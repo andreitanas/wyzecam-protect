@@ -77,12 +77,13 @@ console attached:
 - Not checked yet: booting without an SD card. From the scripts it should
   work, 10 s slower (S10config waits that long for the card; the rollback
   runs only with the card mounted; uvcd and its model are in flash).
-- Left on the test camera (2026-10-28): uvcd runs from the SD card
-  (`/sdcard/uvc/uvcd`, which `uvcd-run` prefers to the one in flash), as the
-  flashed image predates the audio limiter; delete it once an image with
-  the limiter is flashed. `/sdcard/nightlog.sh` appends the exposure figure,
-  gain and day/night state to `/sdcard/nightlog.txt` every minute, for the
-  night test below; stop it and delete both when done.
+- Left on the test camera (2026-10-28): `/sdcard/nightlog.sh` appends the
+  exposure figure, gain and day/night state to `/sdcard/nightlog.txt` every
+  minute, for the night test below; stop it and delete both when done. It
+  was restarted by hand after the 23:21 reboot (a `---` line in the log
+  marks it); a reboot stops it. The image flashed then (the trimmed kernel,
+  [Kernel size](#kernel-size)) has the audio limiter, so the development
+  uvcd on the SD card is gone and uvcd runs from flash.
 - Next: night mode in real darkness (the day/night thresholds were measured
   under the vendor's ISP; uvcd's exposure figure follows the same formula
   but has not seen a dark room yet: read `/sdcard/nightlog.txt` after a
@@ -118,7 +119,9 @@ All pinned in `uvc/kernel/build.sh`:
 - **Device tree** `uvc/kernel/dts/t20.dtsi`, `wyze-cam-v2.dts`, copied into the
   tree and linked into the kernel.
 - **RTL8189FS**: `jwrdegoede/rtl8189ES_linux` branch `rtl8189fs`, commit
-  `13bbdbc` (2026-09-11; it follows kernels up to 7.3).
+  `13bbdbc` (2026-09-11; it follows kernels up to 7.3). Built without its
+  debug messages, `/proc` files and bridge MAC cloning; the kernel symbols it
+  imports are listed in `uvc/kernel/8189fs.syms` ([Kernel size](#kernel-size)).
 - **Hardware reference**: Ingenic's 3.10.14 tree as shipped in OpenMiko
   (`openmiko/openmiko`, `kernel_sources/kernel-3.10.14.tar.xz`, with its
   `patches/kernel/`), which is the tree the camera runs today. The board is the
@@ -190,8 +193,9 @@ pages. CMA costs 37 KB of kernel.
   is booted the same way (`uImage.lzma`), so this U-Boot has LZMA; gzip would not
   fit (2.3 MB).
 - The unpacked kernel must end below 0x80600000, where U-Boot put the uImage:
-  5 MiB at most. `build.sh` fails above that. This is why cfg80211 and IPv6 are
-  modules and the log buffer is 16 KB.
+  5 MiB at most. `build.sh` fails above that. This is why cfg80211 and the
+  media and sound drivers are modules, the log buffer is 16 KB and exported
+  symbols no module uses are dropped ([Kernel size](#kernel-size)).
 - The device tree is linked into the kernel (`CONFIG_BUILTIN_DTB`): this U-Boot
   passes argc/argv, not a DTB, so mainline's generic MIPS code takes the built-in
   one. The kernel command line comes from the device tree
@@ -204,21 +208,65 @@ pages. CMA costs 37 KB of kernel.
 
 | | Today (OpenMiko 3.10.14) | Linux 6.18 |
 |---|---|---|
-| uImage | (in a 2048 KiB partition, with the initramfs) | 1,771,467 bytes of 2,097,152 (84 %) |
-| Unpacked image | | 5,215,064 bytes of 5,242,880 (27 KB left; 2026-10-28, with the encoders, audio, CMA) |
-| Kernel code | 3877k | 3717k |
-| Data | 1205k | 187k rwdata, 940k rodata, 67k bss |
-| Init, freed after boot | | 204k |
-| Modules loaded for WiFi | 8189fs (cfg80211 built in) | cfg80211 504k, ipv6 555k, 8189fs (2.2 MB file, stripped), firmware_class, libsha1 |
-| Root filesystem | `rootfs.tar.xz` unpacked into RAM (zram) on every boot | squashfs read from flash, page cache only |
-| Free at boot | | 91,620K of 131,072K with the camera memory a reserved pool; with it a CMA area, 124,868K total and 59 MB available while uvcd streams |
+| uImage | (in a 2048 KiB partition, with the initramfs) | 1,517,584 bytes of 2,097,152 (72 %) |
+| Unpacked image | | 4,451,564 bytes of 5,242,880 (791 KB left; 2026-10-28, trimmed, with the encoders, audio, CMA) |
+| Kernel code | 3877k | 3291k |
+| Data | 1205k | 191k rwdata, 688k rodata, 68k bss |
+| Init, freed after boot | | 172k |
+| Modules loaded for WiFi | 8189fs (cfg80211 built in) | cfg80211 328k, 8189fs 992k (a 1.47 MB file, stripped), firmware_class |
+| Root filesystem | `rootfs.tar.xz` unpacked into RAM (zram) on every boot | squashfs read from flash, page cache only (5,111,808 bytes, 156 of 274 blocks) |
+| Free at boot | | 91,620K of 131,072K with the camera memory a reserved pool; with it a CMA area, 125,612K total and 73 MB available while uvcd streams |
 
 Kernel figures as the kernel prints them at boot on the camera ("Memory: ...
 kernel code, rwdata, rodata, init, bss"), with the media core built in and the
-camera drivers as modules. The resident kernel is a little
-smaller than today's; cfg80211 and IPv6 move from built-in to modules, so with
-WiFi up the total is about the same. The large saving is the root filesystem,
-which no longer sits in RAM.
+camera drivers as modules; module sizes as `lsmod` shows them. The resident
+kernel is smaller than today's even with cfg80211 a module, and there is no
+IPv6. The large saving is the root filesystem, which no longer sits in RAM.
+
+### Kernel size
+
+**Decision (2026-10-28): exported symbols no module uses are dropped, and
+the WiFi driver is built without its debug code; KALLSYMS and the debugging
+interfaces stay.** Before this the unpacked kernel was 27 KB below U-Boot's
+5 MiB limit. Measured on the camera's build:
+
+| Change | Saved |
+|---|---|
+| `TRIM_UNUSED_KSYMS`, with `kernel/8189fs.syms` | about 550 KB of kernel: 934 symbols stay exported of about 3,500 |
+| Small options: `ETHTOOL_NETLINK`, `CFG80211_WEXT`, `LEGACY_PTYS`, `SYSVIPC`, `IKCONFIG`, the XZ branch converters, `SQUASHFS_ZLIB`, `JFFS2_FS_WRITEBUFFER`, the 8250's DMA and variants, the heartbeat LED trigger | about 210 KB of kernel together |
+| 8189fs without `RTW_DEBUG`, `PROC_DEBUG`, `BR_EXT` | 454 KB of resident module code (1,290,895 to 836,475 bytes of text), 815 KB of flash |
+| No IPv6 | the 368 KB module (555 KB with its allocations), 568 KB of flash |
+
+All together: vmlinux.bin 5,215,064 to 4,451,564 bytes, the uImage 1,771,480
+to 1,517,584, and 744 KB more MemTotal. Booted on the camera with WiFi,
+SSH, the SD card and a write to `/config`; uvcd connected to Protect and
+started both streams and the microphone's.
+
+- The trim keeps what in-tree modules import, so only the out-of-tree
+  8189fs needs a list. It is the driver's imports with its debug code on
+  (177 symbols, 16 more than the build uses), so a debug build loads on the
+  same kernel. A symbol missing from it fails `build.sh` (modpost: undefined),
+  not the camera. Another out-of-tree module needs its imports added and a
+  new kernel.
+- IPv6 went because nothing uses it: uvcd connects to Protect and joins
+  the discovery multicast over IPv4 only (`util.c`, `discovery.c`), and
+  udhcpc and ntpd are IPv4.
+- SysV IPC went: only the closed libimp used it, on 3.10. syslogd runs
+  without `-C`, and musl's `sem_open` maps a file in `/dev/shm`.
+- Kept: `KALLSYMS` (about 390 KB). Without it MIPS does not unwind a call
+  trace: `show_backtrace()` always takes the raw path
+  (`arch/mips/include/asm/stacktrace.h`, `raw_show_trace` is 1), which
+  prints every text address found on the stack, and System.map cannot
+  name module addresses. Worth dropping once the camera drivers settle.
+  Also kept, for debugging: `DEVMEM` (`devmem` on ISP registers),
+  `I2C_CHARDEV`, `SERIAL_EARLYCON` and the 16 KB log.
+- Not done: AP mode and Wi-Fi Direct in 8189fs (`rtw_ap.o` and
+  `rtw_p2p.o`, about 80 KB of code), which `include/autoconf.h` defines,
+  so a patch to the driver; and `EPOLL`, `FILE_LOCKING` and similar (40 KB),
+  which need every binary we did not build checked first.
+- 8189fs stays a module. Built in it would not save RAM (it is always
+  loaded), would need cfg80211 built in too (about 1.2 MB with it, more than
+  the room left), and every driver change would need a new kernel.
 
 ## Root filesystem without the initramfs
 

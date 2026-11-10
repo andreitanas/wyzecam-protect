@@ -28,7 +28,9 @@ CONFIG_BLK_DEV_INITRD=n
 
 ## Core kernel features userspace needs
 CONFIG_MULTIUSER=y
-CONFIG_SYSVIPC=y
+# No SysV IPC: only the closed libimp used it (on 3.10); syslogd runs
+# without -C, musl's sem_open maps a file in /dev/shm
+CONFIG_SYSVIPC=n
 CONFIG_POSIX_TIMERS=y
 CONFIG_PRINTK=y
 CONFIG_BUG=y
@@ -50,6 +52,7 @@ CONFIG_BINFMT_SCRIPT=y
 CONFIG_FILE_LOCKING=y
 CONFIG_TTY=y
 CONFIG_UNIX98_PTYS=y
+CONFIG_LEGACY_PTYS=n
 CONFIG_PROC_FS=y
 CONFIG_PROC_SYSCTL=y
 CONFIG_SYSFS=y
@@ -61,11 +64,18 @@ CONFIG_DEVTMPFS=y
 CONFIG_DEVTMPFS_MOUNT=y
 # /dev/mem: libimp maps the ISP and encoder memory (ispmem/rmem) through it
 CONFIG_DEVMEM=y
-CONFIG_IKCONFIG=y
-CONFIG_IKCONFIG_PROC=y
+# The configuration is in build.sh's out/config, not /proc/config.gz
+CONFIG_IKCONFIG=n
 CONFIG_LOCALVERSION_AUTO=n
 CONFIG_MODULES=y
 CONFIG_MODULE_UNLOAD=y
+# Exported symbols no module uses are dropped (550 KB of kernel); the
+# out-of-tree WiFi driver's imports are kept by kernel/8189fs.syms, which
+# build.sh copies into the source tree
+CONFIG_TRIM_UNUSED_KSYMS=y
+CONFIG_UNUSED_KSYMS_WHITELIST="8189fs.syms"
+# Kept while the camera drivers change: without it a MIPS oops has no
+# unwound call trace, only a scan of the stack for text addresses
 CONFIG_KALLSYMS=y
 CONFIG_MAGIC_SYSRQ=y
 # 16 KB of log; the default 128 KB ring costs ~0.5 MB of kernel image
@@ -89,6 +99,9 @@ CONFIG_SERIAL_8250_CONSOLE=y
 CONFIG_SERIAL_8250_NR_UARTS=2
 CONFIG_SERIAL_8250_RUNTIME_UARTS=2
 CONFIG_SERIAL_8250_INGENIC=y
+CONFIG_SERIAL_8250_DMA=n
+CONFIG_SERIAL_8250_16550A_VARIANTS=n
+CONFIG_SERIAL_8250_DEPRECATED_OPTIONS=n
 CONFIG_SERIAL_OF_PLATFORM=n
 CONFIG_SERIAL_EARLYCON=y
 
@@ -103,7 +116,6 @@ CONFIG_LEDS_CLASS=y
 CONFIG_LEDS_GPIO=y
 CONFIG_LEDS_TRIGGERS=y
 CONFIG_LEDS_TRIGGER_TIMER=y
-CONFIG_LEDS_TRIGGER_HEARTBEAT=y
 
 ## Watchdog (uvcd arms /dev/watchdog)
 CONFIG_WATCHDOG=y
@@ -167,7 +179,7 @@ CONFIG_VIDEO_INGENIC_T20_VPU=m
 CONFIG_DMADEVICES=y
 CONFIG_DMA_JZ4780=y
 # Audio: the microphone through the AIC and the internal codec (our patch
-# 0014); modules, as the kernel is near 5 MB raw
+# 0014); modules, like the media drivers
 CONFIG_SOUND=m
 CONFIG_SND=m
 CONFIG_SND_SOC=m
@@ -182,9 +194,19 @@ CONFIG_SND_PCM_OSS=m
 CONFIG_MISC_FILESYSTEMS=y
 CONFIG_SQUASHFS=y
 CONFIG_SQUASHFS_XZ=y
+CONFIG_SQUASHFS_ZLIB=n
+# root.sqfs is plain xz (no -Xbcj): no branch converters
+CONFIG_XZ_DEC_X86=n
+CONFIG_XZ_DEC_POWERPC=n
+CONFIG_XZ_DEC_ARM=n
+CONFIG_XZ_DEC_ARMTHUMB=n
+CONFIG_XZ_DEC_ARM64=n
+CONFIG_XZ_DEC_SPARC=n
+CONFIG_XZ_DEC_RISCV=n
 CONFIG_SQUASHFS_FILE_DIRECT=y
 CONFIG_JFFS2_FS=y
-CONFIG_JFFS2_FS_WRITEBUFFER=y
+# No write buffer: NOR flash writes single bytes
+CONFIG_JFFS2_FS_WRITEBUFFER=n
 # The vendor kernel writes the config partition with zlib, rtime and lzo
 CONFIG_JFFS2_COMPRESSION_OPTIONS=y
 CONFIG_JFFS2_ZLIB=y
@@ -197,21 +219,24 @@ CONFIG_NLS_CODEPAGE_437=y
 CONFIG_NLS_ISO8859_1=y
 CONFIG_NLS_UTF8=y
 
-## Networking: IPv4/IPv6 over WiFi
+## Networking: IPv4 over WiFi
 CONFIG_NET=y
 CONFIG_PACKET=y
 CONFIG_UNIX=y
 CONFIG_INET=y
 CONFIG_IP_MULTICAST=y
-# IPv6 as a module (330 KB), loaded at boot by S20wifi
-CONFIG_IPV6=m
+# No IPv6: uvcd, Protect's discovery (multicast), DHCP and NTP are IPv4
+# (the module was 555 KB of RAM)
+CONFIG_IPV6=n
 CONFIG_INET_DIAG=n
-CONFIG_IPV6_SIT=n
+# ethtool's netlink API: no ethtool, no wired interface
+CONFIG_ETHTOOL_NETLINK=n
 CONFIG_NETDEVICES=y
 CONFIG_WLAN=y
 # Modules, loaded with the WiFi driver: keeps the kernel under 5 MB raw
 CONFIG_CFG80211=m
-CONFIG_CFG80211_WEXT=y
+# No wireless extensions: wpa_supplicant uses nl80211, nothing runs iwconfig
+CONFIG_CFG80211_WEXT=n
 # Signed regdb checking pulls RSA and X.509 into the kernel
 CONFIG_CFG80211_CERTIFICATION_ONUS=y
 CONFIG_CFG80211_REQUIRE_SIGNED_REGDB=n

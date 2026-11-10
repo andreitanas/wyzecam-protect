@@ -12,7 +12,8 @@
 #     by sha256 (they run on any x86_64 glibc host with libmpc/libisl;
 #     on Ubuntu 24.04 those are installed with gcc)
 #   rtl8189fs (WiFi) from jwrdegoede/rtl8189ES_linux, by commit
-# Patches in kernel/patches/ are applied in order; kernel/dts/ is copied in.
+# Patches in kernel/patches/ are applied in order; kernel/dts/ and the
+# WiFi driver's symbol list (kernel/8189fs.syms) are copied in.
 # Host tools: make, gcc, flex, bison, bc, python3, xz (lzma), git, curl,
 # depmod (kmod).
 set -e
@@ -75,6 +76,7 @@ if [ "$(cat "$SRC/.git/patched" 2>/dev/null)" != "$PATCHES" ]; then
     echo "$PATCHES" > "$SRC/.git/patched"
 fi
 cp "$TOP"/kernel/dts/*.dts "$TOP"/kernel/dts/*.dtsi "$SRC/arch/mips/boot/dts/ingenic/"
+cp "$TOP"/kernel/8189fs.syms "$SRC/"
 
 export ARCH=mips CROSS_COMPILE=mipsel-linux-gnu-
 export KBUILD_BUILD_USER=uvc KBUILD_BUILD_HOST=build
@@ -109,14 +111,17 @@ if [ ! -d "$WIFI" ]; then
     git -c advice.detachedHead=false clone -q -b rtl8189fs https://github.com/jwrdegoede/rtl8189ES_linux "$WIFI"
     git -C "$WIFI" checkout -q $RTL8189FS_COMMIT
 fi
-# Its own make does not notice a new kernel configuration (struct layouts
-# change with it): rebuilt from clean when the configuration differs
-if ! cmp -s "$OUT/obj/.config" "$WIFI/.kernel-config"; then
+# Without the factory test mode, its debug messages and /proc files, and the
+# bridge MAC cloning (BR_EXT): 836 KB of code instead of 1.29 MB, all of it
+# resident. The kernel keeps the debug build's imports too (8189fs.syms).
+WIFI_OPTS="CONFIG_RTL8189FS=m CONFIG_MP_INCLUDED=n CONFIG_RTW_DEBUG=n CONFIG_PROC_DEBUG=n CONFIG_BR_EXT=n"
+# Its own make notices neither a new kernel configuration (struct layouts
+# change with it) nor new options: rebuilt from clean when either differs
+if ! { cat "$OUT/obj/.config"; echo "$WIFI_OPTS"; } | cmp -s - "$WIFI/.kernel-config"; then
     make -s -C "$OUT/obj" M="$WIFI" clean
-    cp "$OUT/obj/.config" "$WIFI/.kernel-config"
+    { cat "$OUT/obj/.config"; echo "$WIFI_OPTS"; } > "$WIFI/.kernel-config"
 fi
-make -s -C "$OUT/obj" M="$WIFI" -j"$JOBS" \
-    CONFIG_RTL8189FS=m CONFIG_MP_INCLUDED=n USER_EXTRA_CFLAGS="-Wno-error" modules
+make -s -C "$OUT/obj" M="$WIFI" -j"$JOBS" $WIFI_OPTS USER_EXTRA_CFLAGS="-Wno-error" modules
 
 # Outputs
 D=$OUT/out
