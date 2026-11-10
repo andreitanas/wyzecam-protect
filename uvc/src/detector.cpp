@@ -3,11 +3,17 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include <vector>
+
 #include "fastconv.h"
 #include "net.h"
 
 struct detector {
     ncnn::Net net;
+    // Kept between passes: a 0.7 MB allocation a pass is a memory mapping
+    // made and dropped each time, under malloc's lock
+    ncnn::Mat in;
+    std::vector<uint8_t> scaled;
 };
 
 // COCO index (0-based) to Protect type, -1 for classes Protect has no use for.
@@ -55,11 +61,28 @@ struct detector *detector_open(const char *model) {
 
 int detector_run(struct detector *d, const uint8_t *rgb, int w, int h, int in_w, int in_h,
                  struct detection *out, int max) {
-    ncnn::Mat in = ncnn::Mat::from_pixels_resize(rgb, ncnn::Mat::PIXEL_RGB, w, h, in_w, in_h);
-    const float mean[3] = {0, 0, 0}, norm[3] = {1 / 255.f, 1 / 255.f, 1 / 255.f};
-    in.substract_mean_normalize(mean, norm);
+    // The network's input: the picture scaled to in_w x in_h, as planes of
+    // 0..1 floats
+    const uint8_t *px = rgb;
+    if (w != in_w || h != in_h) {
+        d->scaled.resize((size_t)in_w * in_h * 3);
+        ncnn::resize_bilinear_c3(rgb, w, h, d->scaled.data(), in_w, in_h);
+        px = d->scaled.data();
+    }
+    // A new one if the last pass's is still referenced (it is not: the
+    // extractor is gone) or the size changed
+    if (d->in.w != in_w || d->in.h != in_h || d->in.c != 3 || !d->in.refcount || *d->in.refcount != 1)
+        d->in.create(in_w, in_h, 3);
+    if (d->in.empty())
+        return 0;
+    float *r = d->in.channel(0), *g = d->in.channel(1), *b = d->in.channel(2);
+    for (int i = 0, n = in_w * in_h; i < n; i++, px += 3) {
+        r[i] = px[0] * (1 / 255.f);
+        g[i] = px[1] * (1 / 255.f);
+        b[i] = px[2] * (1 / 255.f);
+    }
     ncnn::Extractor ex = d->net.create_extractor();
-    ex.input("data", in);
+    ex.input("data", d->in);
     ncnn::Mat res;
     if (ex.extract("output", res) != 0)
         return 0;

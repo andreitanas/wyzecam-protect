@@ -136,6 +136,12 @@ build/test_opus-mipsel: test/test_opus.c $(addprefix build/camera/,$(OPUS_SRC:.c
 build/test_opus: test/test_opus.c $(addprefix build/host/,$(OPUS_SRC:.c=.o))
 	$(HOST_CC) $(CFLAGS_COMMON) -o $@ $^ -lm
 
+# TLS handshake cost against Protect, on the camera (test/test_tls.c)
+build/test_tls-mipsel: test/test_tls.c build/camera/src/tls.o build/camera/src/util.o \
+		build/camera/src/camera_malloc.o \
+		$(addprefix build/camera/,$(patsubst %.c,%.o,$(wildcard $(MBEDTLS)/library/*.c)))
+	$(CAMERA_CC) $(CFLAGS_COMMON) -static -s -Wl,--gc-sections -o $@ $^ -lpthread -lm
+
 build/test_audio-mipsel: test/test_audio.c build/camera/src/audio.o build/camera/src/util.o \
 		build/camera/$(MBEDTLS)/library/sha1.o build/camera/$(MBEDTLS)/library/platform_util.o \
 		$(addprefix build/camera/,$(patsubst %.c,%.o,$(filter $(VOAAC)/%,$(DEP_SRC))))

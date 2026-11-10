@@ -221,9 +221,10 @@ static void apply_isp(void) {
     level(fd, V4L2_CID_SATURATION, night ? 0 : params.saturation);
     level(fd, V4L2_CID_SHARPNESS, params.sharpness);
     level(fd, ctrl_by_name(fd, "Noise Reduction"), params.denoise);
-    // Off for now (2026-10-28): its 8 MB a frame of memory traffic broke
-    // the 1080p frames and the audio with the detector running
-    // (docs/kernel-modern.md)
+    // Off: with it on, within 15 minutes of streaming with the detector the
+    // ISP's picture came out shifted 650 pixels sideways, wrapped, in wrong
+    // colours, until the capture restarted (2026-10-28 and 2026-11-10,
+    // docs/kernel-modern.md, Temporal noise reduction)
     ctrl_set(fd, ctrl_by_name(fd, "Temporal Noise Reduction"), 0);
     // WDR 1-3: Iridix at 32, 64, 128 (128 already flattens the picture)
     int drc = ctrl_by_name(fd, "Dynamic Range Compression");

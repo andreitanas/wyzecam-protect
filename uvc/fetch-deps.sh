@@ -12,6 +12,7 @@ STB=003501f6d7a8668ce8b6d875e34dd97ad0d5d5b5
 DROPBEAR=2026.94
 VOAAC=0.1.3
 OPUS=1.5.2
+DLMALLOC_SHA256=be7be56b40b4b31417e74e77687f9b96127ea6cae534cf236aee40a4c739508d
 OPUS_SHA256=65c1d2f78b9f2fb20082c38cbe47c951ad5839345876e46941612ee87f9a7ce1
 VOAAC_SHA256=ae38610405f862237f6c70360c406297cc4222abf82e86722c505ba74b53a97d
 # Signed by the Dropbear release key F734 7EF2 EE2E 07A2 6762 8CA9 4493 1494 F29C 6773
@@ -87,3 +88,12 @@ if [ ! -d models ]; then
 fi
 
 echo "Done."
+
+# The camera's malloc, version 2.8.6 (MIT-0): zig's libc has one that spins
+# (src/camera_malloc.c)
+if [ ! -f dlmalloc/malloc.c ]; then
+    mkdir -p dlmalloc
+    curl -fsSL "https://gee.cs.oswego.edu/pub/misc/malloc.c" -o dlmalloc/malloc.c.tmp
+    echo "$DLMALLOC_SHA256  dlmalloc/malloc.c.tmp" | shasum -a 256 -c - >/dev/null
+    mv dlmalloc/malloc.c.tmp dlmalloc/malloc.c
+fi
