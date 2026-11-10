@@ -93,8 +93,11 @@ console attached:
   probes), in [`protect-streaming.md`](protect-streaming.md). Open from it:
   temporal noise reduction is off in uvcd (with the detector running it
   broke the 1080p frames and the audio), which the GEN32 decision above did
-  not know; and the detector is off on the test camera (about 90% of the
-  CPU with it on, in a short test).
+  not know.
+- The object detector is back on on the test camera (2026-11-10) and takes
+  0.7 s a pass instead of 1.4 s, with convolution layers of uvcd's own
+  ([Object detector](#object-detector)); Protect's app shows its
+  detections. It runs from the SD card like the rest of this uvcd.
 - Next: an image with this uvcd and patch 0016; night mode in real darkness (the day/night thresholds were measured
   under the vendor's ISP; uvcd's exposure figure follows the same formula
   but has not seen a dark room yet: read `/sdcard/nightlog.txt` after a
@@ -378,6 +381,46 @@ At volume 100 a quiet room comes out at -46 dBFS RMS (peaks -21 dBFS), so
 background sound is audible and a loud sound has about 20 dB before it
 reaches the limiter. An automatic gain control in software, if needed,
 would go in the same place.
+
+### Object detector
+
+uvcd runs Yolo-Fastest 1.1 (COCO, ncnn) on the 640x360 raw frames while
+there is motion, in a thread at nice 19 (`uvc/src/objects.c`,
+`detector.cpp`). On a frame that moves all over, a pass took 1.4 s with
+uvcd streaming (0.93 s of CPU): ncnn has no SIMD to use on this CPU and its
+plain loops suit the FPU badly
+([measurements](t20-isp-hardware.md#cpu-fpu-and-memory-timing-measured-2026-11-10)).
+
+**Decision (2026-11-10): the model's convolutions run in uvcd's own layers**
+(`uvc/src/fastconv.cpp`), registered with ncnn in place of its `Convolution`
+and `ConvolutionDepthWise`; everything else stays ncnn's. A pass takes 0.7 s
+(0.47 s of CPU), the raw outputs agree with ncnn's to 2e-5
+(`uvc/test/test_fastconv.cpp`, in `make test`, also under the address
+sanitizer), and the camera's streams keep their frames (1501 a minute, largest
+timestamp step 41 ms).
+
+- The layers keep many sums going at once, each in a register: 1x1
+  convolutions 16 (4 pixels of 4 output channels), depthwise ones 8 pixels.
+  1x1 convolutions first copy a stretch of pixels of all input channels to an
+  8 KB buffer; depthwise ones pad by copying the rows in use to row buffers.
+- Per multiply-add, wall time with uvcd running: 1x1 from 9-21 ns to 4.4-7,
+  depthwise 3x3 from 33-39 ns to 10-12, the first 3x3 from 21 ns to 6.
+- An empty assembly statement after each depthwise multiply-add (`KEEP`)
+  holds the compiler to the written order, and the file is built without
+  `-ffast-math`. `uvc/tools/maddgap.py` reads the generated assembly for
+  sums that follow each other too closely; `uvc/bench/fast.sh` runs it.
+  Sixteen sums in the depthwise kernel made the compiler spill them to the
+  stack (4 times slower than ncnn), hence 8.
+- Rejected: **FastestDet** (the other small model in `uvc/bench`). With these
+  layers it takes 0.64 s at 352x192 against 0.71 s, and on the test scene it
+  adds two boxes the width of the picture. **8-bit models**: integer
+  multiply-adds are slower than float ones here.
+- Left: the last 1x1 convolution computes 255 channels (80 classes for each
+  of 3 anchors) of which Protect's three types need 63 (37 ms of the 0.7 s);
+  the input's conversion and scaling (about 35 ms); the depthwise kernels
+  are at 10 ns a multiply-add where the FPU allows about 5.
+- `uvc/bench/prof.sh` prints a model's per-layer times on the camera (the
+  fastest of 8 runs, since uvcd keeps running).
 
 ### WDR
 

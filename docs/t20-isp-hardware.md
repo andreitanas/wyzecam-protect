@@ -396,3 +396,31 @@ Xiaomi Dafang tree's `sound/oss/jzsound`, `soc-t20` headers).
 - The one ADC's samples are in the right I2S channel; the left channel has
   a copy of every 8th sample and zeros between (in mono mode as in stereo):
   the vendor sums the two in software, we take the right one.
+
+## CPU: FPU and memory timing (measured 2026-11-10)
+
+For the object detector's arithmetic. Measured on the camera with uvcd
+running, in CPU time, taking 860 MHz for the clock
+(`uvc/build/av-debug/2026-11-10-detector/fpu/seq.S`, `macbench.c`,
+`membench.c`; the folder is not in git).
+
+- **The FPU is slow to finish and quick to start.** `madd.s` takes 15 cycles
+  to deliver its result, and a new one can start every 2. `mul.s` takes 7,
+  `add.s` 9. Anything that reads a result, a store included, waits for it:
+  a loop that loads, multiplies and stores one value at a time costs 19 to
+  29 cycles a value. A sum of products costs 16.6 cycles a product as one
+  running sum, 8.3 with two sums in turn, 5.8 with eight, 2.9 with sixteen
+  (4 pixels by 4 output channels, 8 loads for 16 products).
+- `lwc1` 1.2 cycles, `swc1` 1.6, `c.ule.s` + `movf.s` 0.8 each.
+- **Integers are no faster**: 16-bit products summed in 32 bits cost 6 to 8
+  cycles each in C (`mul`/`madd` 1.7 cycles alone), against 2.9 for floats.
+  This is why ncnn's 8-bit models ran slower than its float ones in October.
+- **Memory**: reading one float of every 32-byte cache line of a 4 MB block
+  takes 32 ns a line (965 MB/s); writing every float 483 MB/s, 621 MB/s with
+  `pref 30` (prepare for store) on each line first. The data cache is 32 KB.
+  Reading the same pixel of many separate planes is slow where the planes
+  evict each other: a 1x1 convolution over 32 planes of 80x48 floats took
+  29 ns a product until the pixels were copied to one small buffer first.
+- The compiler (LLVM 20 in zig 0.17) does not know any of this: it puts one
+  sum's multiply-adds next to each other when it can, and with `-ffast-math`
+  it merges sums that the source keeps apart.

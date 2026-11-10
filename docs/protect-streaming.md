@@ -144,8 +144,8 @@ the probe's time, encDelay the camera's delay from capture to sending.
 - Not followed up: in a capture on the NVR, one TCP flow between the camera
   (port 2058) and 64.6.119.138 port 7550, 159 KB toward the camera.
 - Protect showed "Last Motion: 11 Days Ago" for this camera on 2026-11-09:
-  the detector is off (`DETECT_MODEL=`), and until that day Protect dated the
-  camera's frames days in the past. To check once the detector is back.
-- With the detector on, total CPU reached about 90% in a 20 s test in October
-  (inference at nice 19 took 56%; recording stayed at 25 fps). The detector
-  and temporal noise reduction are still off on the camera.
+  the detector was off (`DETECT_MODEL=`), and until that day Protect dated
+  the camera's frames days in the past. The detector is on again since
+  2026-11-10 and sends its events (`kernel-modern.md`, Object detector), and
+  the app shows its detections (user, 2026-11-10).
+- Temporal noise reduction is still off in uvcd.
