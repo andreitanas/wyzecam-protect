@@ -82,9 +82,20 @@ console attached:
   minute, for the night test below; stop it and delete both when done. It
   was restarted by hand after the 23:21 reboot (a `---` line in the log
   marks it); a reboot stops it. The image flashed then (the trimmed kernel,
-  [Kernel size](#kernel-size)) has the audio limiter, so the development
-  uvcd on the SD card is gone and uvcd runs from flash.
-- Next: night mode in real darkness (the day/night thresholds were measured
+  [Kernel size](#kernel-size)) has the audio limiter. Since 2026-11-10 uvcd
+  runs from the SD card again (`/sdcard/uvc/uvcd`): the build that Protect's
+  mobile apps play ([`protect-streaming.md`](protect-streaming.md)), which
+  the flashed image does not have; delete it once an image with it and
+  kernel patch 0016 is flashed.
+- Protect's mobile apps (2026-11-10): they played clicks for audio and
+  waited seconds after a switch to the camera; uvcd's stream now follows a
+  UniFi camera's (64-bit clock ticks, an Opus track, answers to latency
+  probes), in [`protect-streaming.md`](protect-streaming.md). Open from it:
+  temporal noise reduction is off in uvcd (with the detector running it
+  broke the 1080p frames and the audio), which the GEN32 decision above did
+  not know; and the detector is off on the test camera (about 90% of the
+  CPU with it on, in a short test).
+- Next: an image with this uvcd and patch 0016; night mode in real darkness (the day/night thresholds were measured
   under the vendor's ISP; uvcd's exposure figure follows the same formula
   but has not seen a dark room yet: read `/sdcard/nightlog.txt` after a
   night), shading (needs a flat field), the speaker for talkback (the test

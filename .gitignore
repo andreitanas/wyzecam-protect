@@ -1,3 +1,4 @@
 utils
 deploy
 backup
+__pycache__/
