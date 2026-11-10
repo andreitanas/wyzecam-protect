@@ -221,7 +221,10 @@ static void apply_isp(void) {
     level(fd, V4L2_CID_SATURATION, night ? 0 : params.saturation);
     level(fd, V4L2_CID_SHARPNESS, params.sharpness);
     level(fd, ctrl_by_name(fd, "Noise Reduction"), params.denoise);
-    level(fd, ctrl_by_name(fd, "Temporal Noise Reduction"), params.denoise);
+    // Off for now (2026-10-28): its 8 MB a frame of memory traffic broke
+    // the 1080p frames and the audio with the detector running
+    // (docs/kernel-modern.md)
+    ctrl_set(fd, ctrl_by_name(fd, "Temporal Noise Reduction"), 0);
     // WDR 1-3: Iridix at 32, 64, 128 (128 already flattens the picture)
     int drc = ctrl_by_name(fd, "Dynamic Range Compression");
     if (drc)
@@ -550,6 +553,17 @@ int capture_v4l2_available(void) {
     return 1;
 }
 
+// A new stream connection waits for an IDR before it can send video.
+// Request one now rather than waiting for the encoder's normal GOP boundary.
+static void request_keyframe(struct source *src) {
+    pthread_mutex_lock(&life_lock);
+    struct stream *s = src == hi_st.src ? &hi_st : src == lo_st.src ? &lo_st : NULL;
+    if (running && s && s->enc >= 0 &&
+        ctrl_set(s->enc, V4L2_CID_MPEG_VIDEO_FORCE_KEY_FRAME, 0) < 0)
+        log_warn("capture: %s keyframe request: %s", s->isp_name, strerror(errno));
+    pthread_mutex_unlock(&life_lock);
+}
+
 int capture_v4l2_start(const struct config *c, struct source *hi, struct source *lo) {
     cfg = c;
     // The sensor's native size; the T20's sensors here are all 1080p.
@@ -561,6 +575,14 @@ int capture_v4l2_start(const struct config *c, struct source *hi, struct source 
     int rc = start();
     if (rc < 0)
         stop();
+    else {
+        pthread_mutex_lock(&hi->lock);
+        hi->request_keyframe = request_keyframe;
+        pthread_mutex_unlock(&hi->lock);
+        pthread_mutex_lock(&lo->lock);
+        lo->request_keyframe = request_keyframe;
+        pthread_mutex_unlock(&lo->lock);
+    }
     pthread_mutex_unlock(&life_lock);
     if (rc == 0)
         log_info("capture: V4L2, 1920x1080 @ %d kbit/s, %dx%d @ %d kbit/s, %d fps", c->hi_kbps,

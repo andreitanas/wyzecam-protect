@@ -11,6 +11,8 @@ NCNN=20260526
 STB=003501f6d7a8668ce8b6d875e34dd97ad0d5d5b5
 DROPBEAR=2026.94
 VOAAC=0.1.3
+OPUS=1.5.2
+OPUS_SHA256=65c1d2f78b9f2fb20082c38cbe47c951ad5839345876e46941612ee87f9a7ce1
 VOAAC_SHA256=ae38610405f862237f6c70360c406297cc4222abf82e86722c505ba74b53a97d
 # Signed by the Dropbear release key F734 7EF2 EE2E 07A2 6762 8CA9 4493 1494 F29C 6773
 DROPBEAR_SHA256=e098034a843699200c8c977a991fff73159735bf795d5f72ef672c41a6b1ae81
@@ -45,6 +47,16 @@ if [ ! -d vo-aacenc ]; then
     tar xzf vo-aacenc.tar.gz
     rm vo-aacenc.tar.gz
     mv "vo-aacenc-$VOAAC" vo-aacenc
+fi
+
+# Opus encoder for the microphone's second track (BSD-3-Clause): Protect's
+# mobile apps play the Opus track, the browser the AAC one (docs/protect-streaming.md)
+if [ ! -d opus ]; then
+    curl -fsSL "https://downloads.xiph.org/releases/opus/opus-$OPUS.tar.gz" -o opus.tar.gz
+    echo "$OPUS_SHA256  opus.tar.gz" | shasum -a 256 -c - >/dev/null
+    tar xzf opus.tar.gz
+    rm opus.tar.gz
+    mv "opus-$OPUS" opus
 fi
 
 # stb_image_write: JPEG encoding of detection crops.

@@ -37,7 +37,7 @@ struct config {
     char detect_model[128]; // object detector, path without .param/.bin
     int protect;         // Protect is configured (else only capture runs)
     int fps;
-    int audio;
+    int audio; // 0: no audio track, 1: AAC, 2: AAC and Opus
     int allow_reboot;
     int adopted;
     int watchdog; // hardware watchdog timeout, s (0: off)

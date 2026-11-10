@@ -22,7 +22,7 @@ static void adts(uint8_t *h, size_t len) {
 }
 
 int main(void) {
-    if (audio_start() < 0) {
+    if (audio_start(1) < 0) {
         printf("FAIL: no microphone\n");
         return 1;
     }

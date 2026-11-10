@@ -44,6 +44,9 @@ struct source {
     pthread_t thread;
     pthread_mutex_t lock;
     struct queue *subs;
+    // Optional producer hook, guarded by lock. Called after a subscriber is
+    // linked and lock is released, so the producer may publish immediately.
+    void (*request_keyframe)(struct source *s);
     int width, height; // from the SPS, 0 until the first keyframe
     int64_t last_frame_ms;
 };
@@ -56,6 +59,8 @@ void source_init(struct source *s, const char *name);
 void source_push(struct source *s, struct frame *f);
 void source_subscribe(struct source *s, struct queue *q);
 void source_unsubscribe(struct source *s, struct queue *q);
+// Ask a supporting producer for an immediate IDR; otherwise a no-op.
+void source_request_keyframe(struct source *s);
 // Wait until the stream geometry is known. 0 on success.
 int source_wait_ready(struct source *s, int timeout_ms);
 

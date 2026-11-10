@@ -11,7 +11,34 @@ import argparse
 import struct
 import sys
 
-TYPES = {8: "audio", 9: "video", 18: "script"}
+TYPES = {8: "audio", 9: "video", 10: "opus", 18: "script"}
+AAC_RATES = (96000, 88200, 64000, 48000, 44100, 32000, 24000,
+             22050, 16000, 12000, 11025, 8000, 7350)
+
+
+def aac_sample_rate(config):
+    """Read the clock from an AAC AudioSpecificConfig, including explicit rates."""
+    bits = int.from_bytes(config, "big")
+    remaining = len(config) * 8
+
+    def take(n):
+        nonlocal remaining
+        if remaining < n:
+            raise ValueError("truncated AAC AudioSpecificConfig")
+        remaining -= n
+        return (bits >> remaining) & ((1 << n) - 1)
+
+    if take(5) == 31:  # escaped audioObjectType
+        take(6)
+    index = take(4)
+    if index == 15:
+        rate = take(24)
+        if not rate:
+            raise ValueError("zero AAC sample rate")
+        return rate
+    if index >= len(AAC_RATES):
+        raise ValueError(f"reserved AAC sample-frequency index {index}")
+    return AAC_RATES[index]
 
 
 def amf_value(b, i):
@@ -59,6 +86,8 @@ def main():
     counts = {}
     last_ts = {}
     last_wall = {}
+    audio_clock = None
+    clock_base = None  # onClockSync's streamClockBase, ms
     syncs = 0
     while i + 11 <= len(data):
         ttype = data[i]
@@ -79,6 +108,10 @@ def main():
             desc = f"{label} {val}"
             if label == "onClockSync":
                 syncs += 1
+                fields = val[1] if isinstance(val, tuple) else {}
+                clock_base = fields.get("streamClockBase")
+                if fields.get("streamClock") != ts:
+                    err.append(f"tag @{i}: streamClock {fields.get('streamClock')} != tag ts {ts}")
         elif ttype == 9:
             desc = f"frame={body[0] >> 4} codec={body[0] & 15} pkt={body[1]}"
             if body[0] & 15 == 7 and body[1] == 1:
@@ -99,7 +132,18 @@ def main():
                 err.append(f"tag @{i}: video ts went backwards")
         elif ttype == 8:
             desc = f"fmt={body[0]:#x} pkt={body[1]} data={body[2:10].hex()}"
-        if ttype in (8, 9) and ttype in last_ts and ts < last_ts[ttype]:
+            if body[0] >> 4 == 10 and body[1] == 0:
+                try:
+                    audio_clock = aac_sample_rate(body[2:])
+                except ValueError as e:
+                    audio_clock = None
+                    err.append(f"tag @{i}: {e}")
+        elif ttype == 10:
+            # UniFi's Opus track: a raw packet, TOC byte first
+            desc = f"opus toc={body[0]:#x}" if body else "opus (empty)"
+            if not body:
+                err.append(f"tag @{i}: empty Opus packet")
+        if ttype in (8, 9, 10) and ttype in last_ts and ts < last_ts[ttype]:
             err.append(f"tag @{i}: {name} ts went backwards {last_ts[ttype]} -> {ts}")
         last_ts[ttype] = ts
         i += 15 + size
@@ -109,18 +153,34 @@ def main():
             if len(tr) < 16:
                 break
             clock = int.from_bytes(tr[1:4], "big")
-            want = 90000 if ttype == 9 else 11025
-            if tr[0] != 0 or tr[4:12] != bytes(8):
+            want = 48000 if ttype == 10 else 90000
+            if ttype == 8 and body[0] >> 4 == 10:
+                want = audio_clock
+                if want is None:
+                    err.append(f"trailer @{i}: AAC clock unknown without valid AudioSpecificConfig")
+            if tr[0] != 0 or tr[4:8] != bytes(4):
                 err.append(f"trailer @{i}: bad padding {tr.hex()}")
-            if clock != want:
+            if want is not None and clock != want:
                 err.append(f"trailer @{i}: clock {clock}, expected {want} for {name}")
-            ticks = struct.unpack(">I", tr[12:16])[0]
-            wall = ticks / clock
-            key = "v" if ttype == 9 else "o"
-            if key in last_wall and wall + 0.001 < last_wall[key]:
-                err.append(f"trailer @{i}: wall clock went backwards")
-            last_wall[key] = wall
-            desc += f" wall={wall:.3f}s"
+            ticks = struct.unpack(">Q", tr[8:16])[0]
+            if clock and clock_base is not None:
+                # Protect's rule, as UniFi's cameras keep it: every track's
+                # ticks are (streamClockBase + tag timestamp) on its clock
+                off = ticks - (int(clock_base) + ts) * clock // 1000
+                if abs(off) > clock // 500:
+                    err.append(f"trailer @{i}: {name} ticks are {off} from "
+                               f"(streamClockBase + ts) * {clock} / 1000")
+            if clock:
+                wall = ticks / clock
+                # Script and audio clocks are independent even when they
+                # happen to use the same rate. A new rate starts a new clock.
+                key = (ttype, clock)
+                if key in last_wall and wall + 0.001 < last_wall[key]:
+                    err.append(f"trailer @{i}: {name} wall clock went backwards")
+                last_wall[key] = wall
+                desc += f" wall={wall:.3f}s"
+            else:
+                err.append(f"trailer @{i}: zero clock rate")
             i += 16
 
         if not args.quiet:

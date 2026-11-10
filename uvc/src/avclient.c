@@ -109,7 +109,7 @@ static cJSON *feature_flags(void) {
     static const char *const def[] = {"default"};
     static const char *const enhanced[] = {"enhanced"};
     static const char *const h264[] = {"h264"};
-    static const char *const aac[] = {"aac"};
+    static const char *const aac[] = {"aac", "opus"}; // opus with AUDIO=2 (flv.h)
     static const char *const nature[] = {"nature"};
     cJSON *f = cJSON_CreateObject();
     BOOL(f, "mic", 1); // Protect stores it as reader.supportMic, a boolean in ds
@@ -122,7 +122,7 @@ static cJSON *feature_flags(void) {
     cJSON_AddItemToObject(f, "smartDetectAudioTypes", cJSON_CreateArray());
     BOOL(f, "hasSmartDetect", 1);
     cJSON_AddItemToObject(f, "videoCodecs", str_array(h264, 1));
-    cJSON_AddItemToObject(f, "audioCodecs", str_array(aac, 1));
+    cJSON_AddItemToObject(f, "audioCodecs", str_array(aac, cfg->audio > 1 ? 2 : 1));
     cJSON_AddItemToObject(f, "audioStyle", str_array(nature, 1));
     BOOL(f, "hasHdr", 0);
     BOOL(f, "hasWdr", 1); // the ISP's Iridix (src/capture_v4l2.c)

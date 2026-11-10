@@ -10,17 +10,28 @@ INGENIC := third_party/ingenic
 NCNN := third_party/ncnn
 STB := third_party/stb
 VOAAC := third_party/vo-aacenc
+OPUS := third_party/opus
+# libopus's own source lists (make syntax); fixed-point build, no float API
+# (on the T20 the float build is a quarter slower, and -O3 an eighth faster than -O2)
+-include $(OPUS)/celt_sources.mk $(OPUS)/silk_sources.mk $(OPUS)/opus_sources.mk
+OPUS_SRC := $(addprefix $(OPUS)/,$(CELT_SOURCES) $(SILK_SOURCES) $(SILK_SOURCES_FIXED) $(OPUS_SOURCES))
+OPUS_CFLAGS := -std=gnu11 -O3 -DOPUS_BUILD -DFIXED_POINT -DDISABLE_FLOAT_API -DHAVE_LRINTF \
+	-DVAR_ARRAYS -DHAVE_STDINT_H -I$(OPUS)/include -I$(OPUS)/celt -I$(OPUS)/silk \
+	-I$(OPUS)/silk/fixed -I$(OPUS)/src -ffunction-sections -fdata-sections -w
 
 SRC := $(wildcard src/*.c) $(wildcard src/*.cpp)
 DEP_SRC := $(wildcard $(MBEDTLS)/library/*.c) $(CJSON)/cJSON.c \
 	$(VOAAC)/common/cmnMemory.c $(wildcard $(VOAAC)/aacenc/basic_op/*.c) \
-	$(wildcard $(VOAAC)/aacenc/src/*.c)
+	$(wildcard $(VOAAC)/aacenc/src/*.c) $(OPUS_SRC)
 CFLAGS_COMMON := -std=gnu11 -Wall -Wextra -Wno-unused-parameter -Os \
-	-Isrc -I$(MBEDTLS)/include -I$(CJSON) -I$(STB) -I$(VOAAC)/common/include \
+	-Isrc -I$(MBEDTLS)/include -I$(CJSON) -I$(STB) -I$(VOAAC)/common/include -I$(OPUS)/include \
 	-ffunction-sections -fdata-sections -MMD -MP
 DEP_CFLAGS := -std=gnu11 -Os -I$(MBEDTLS)/include -I$(MBEDTLS)/library -I$(CJSON) \
 	-I$(VOAAC)/common/include -I$(VOAAC)/aacenc/inc -I$(VOAAC)/aacenc/basic_op \
 	-ffunction-sections -fdata-sections -w
+
+# libopus objects take its flags instead of DEP_CFLAGS
+build/host/$(OPUS)/%.o build/camera/$(OPUS)/%.o: DEP_CFLAGS := $(OPUS_CFLAGS)
 
 HOST_CC ?= cc
 HOST_CXX ?= c++
@@ -75,7 +86,7 @@ LIB_HOST_OBJ := $(filter-out build/host/src/main.o,$(HOST_OBJ))
 
 all: build/uvcd
 
-third_party/mbedtls third_party/cjson:
+third_party/mbedtls third_party/cjson third_party/opus:
 	./fetch-deps.sh
 
 build/uvcd: $(HOST_OBJ) $(NCNN_HOST)
@@ -101,25 +112,41 @@ build/test_motion: test/test_motion.c build/host/src/motion.o
 build/test_smart: test/test_smart.c build/host/src/smart.o build/host/$(CJSON)/cJSON.o
 	$(HOST_CC) $(CFLAGS_COMMON) -o $@ $^
 
+build/test_stream_reply: test/test_stream_reply.c src/stream_reply.c src/stream_reply.h
+	$(HOST_CC) $(CFLAGS_COMMON) -o $@ $(filter %.c,$^)
+
+build/test_flv_timeline: test/test_flv_timeline.c build/host/src/flv.o build/host/src/h264.o \
+		build/host/src/util.o build/host/$(MBEDTLS)/library/sha1.o \
+		build/host/$(MBEDTLS)/library/platform_util.o
+	$(HOST_CC) $(CFLAGS_COMMON) -o $@ $^ -lpthread
+
 # On the camera, with our kernel (test/test_capture_v4l2.c)
 build/test_capture_v4l2-mipsel: test/test_capture_v4l2.c build/camera/src/capture_v4l2.o \
 		build/camera/src/source.o build/camera/src/util.o build/camera/src/h264.o \
 		build/camera/$(MBEDTLS)/library/sha1.o build/camera/$(MBEDTLS)/library/platform_util.o
 	$(CAMERA_CC) $(CFLAGS_COMMON) -static -s -Wl,--gc-sections -o $@ $^ -lpthread -lm
 
+build/test_opus-mipsel: test/test_opus.c $(addprefix build/camera/,$(OPUS_SRC:.c=.o))
+	$(CAMERA_CC) $(CFLAGS_COMMON) -static -s -Wl,--gc-sections -o $@ $^ -lm
+build/test_opus: test/test_opus.c $(addprefix build/host/,$(OPUS_SRC:.c=.o))
+	$(HOST_CC) $(CFLAGS_COMMON) -o $@ $^ -lm
+
 build/test_audio-mipsel: test/test_audio.c build/camera/src/audio.o build/camera/src/util.o \
 		build/camera/$(MBEDTLS)/library/sha1.o build/camera/$(MBEDTLS)/library/platform_util.o \
 		$(addprefix build/camera/,$(patsubst %.c,%.o,$(filter $(VOAAC)/%,$(DEP_SRC))))
 	$(CAMERA_CC) $(CFLAGS_COMMON) -static -s -Wl,--gc-sections -o $@ $^ -lpthread -lm
 
-test: build/test_flv build/test_motion build/test_smart
+test: build/test_flv build/test_motion build/test_smart build/test_stream_reply build/test_flv_timeline
 	./build/test_motion
 	./build/test_smart
+	./build/test_stream_reply
+	./build/test_flv_timeline
 	./test/run.sh
 
 clean:
 	rm -rf build
 
 -include $(HOST_OBJ:.o=.d) $(CAMERA_OBJ:.o=.d)
+-include $(wildcard build/host/test/*.d)
 
 .PHONY: all camera test clean

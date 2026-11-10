@@ -372,7 +372,7 @@ int capture_start(const struct config *c, struct source *hi, struct source *lo) 
     if (capture_v4l2_start(c, hi, lo) < 0)
         return -1;
     if (c->audio)
-        audio_start();
+        audio_start(c->audio > 1);
     return 0;
 }
 

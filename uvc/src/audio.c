@@ -20,6 +20,7 @@
 #include <unistd.h>
 
 #include "cmnMemory.h"
+#include "opus.h"
 #include "voAAC.h"
 
 #define RATE 16000
@@ -27,6 +28,13 @@
 #define FRAME_MS (FRAME * 1000 / RATE)
 #define RING 64     // frames kept: 4 s
 #define BITRATE 32000
+#define OPUS_FRAME (RATE * AUDIO_OPUS_MS / 1000)
+#define OPUS_RING 256  // packets kept: 5 s
+#define OPUS_BITRATE 32000
+// On the T20 (test/test_opus.c, CPU time): 3.0% of the CPU at complexity 0,
+// 4.0% at 2; the bit rate hardly matters (12 kbit/s saves a fifth of it).
+// With SILK allowed the encoder takes 18% at 0 and 47% at 2.
+#define OPUS_COMPLEXITY 0
 #define HIGHPASS_HZ 120
 #define GAIN_MAX_DB 30  // at Protect's microphone volume 100
 #define LIMIT 23000     // -3 dBFS: louder peaks are turned down, not clipped
@@ -48,9 +56,20 @@ struct aframe {
     uint8_t data[AUDIO_FRAME_MAX];
 };
 
+struct oframe {
+    int64_t index;  // packet number since the start, -1: empty
+    size_t len;
+    uint8_t data[AUDIO_OPUS_MAX];
+};
+
 static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 static struct aframe ring[RING];
+static struct oframe oring[OPUS_RING];
+static OpusEncoder *opus;
 static int64_t t0_ms;  // monotonic time of sample 0
+// Lookups since the last report: found, missed (the streams sent silence),
+// and the oldest asked for, in ms behind now
+static int hits, misses, lag_max;
 static pthread_t thread;
 static volatile int running;
 static int dsp = -1;
@@ -116,8 +135,10 @@ static size_t encode(int16_t *pcm, uint8_t *out) {
 }
 
 static void *audio_main(void *arg) {
-    static int16_t stereo[FRAME * 2], mono[FRAME];
-    int64_t index = 0;
+    static int16_t stereo[FRAME * 2], mono[FRAME], carry[FRAME + OPUS_FRAME];
+    static struct oframe packets[FRAME / OPUS_FRAME + 1];
+    int64_t index = 0, oindex = 0;
+    int carried = 0;
     while (running) {
         size_t got = 0;
         while (got < sizeof(stereo) && running) {
@@ -140,17 +161,43 @@ static void *audio_main(void *arg) {
             mono[i] = process(stereo[2 * i + 1], gain);
         struct aframe f = {.index = index};
         f.len = encode(mono, f.data);
+        // The same samples in 20 ms Opus packets: 3 or 4 a read
+        int npackets = 0;
+        memcpy(carry + carried, mono, sizeof(mono));
+        carried += FRAME;
+        int used = 0;
+        for (; opus && carried - used >= OPUS_FRAME; used += OPUS_FRAME) {
+            struct oframe *o = &packets[npackets++];
+            int len = opus_encode(opus, carry + used, OPUS_FRAME, o->data, sizeof(o->data));
+            o->index = oindex++;
+            o->len = len > 0 ? len : 0;
+        }
+        if (!opus)
+            used = carried;
+        memmove(carry, carry + used, (carried - used) * sizeof(carry[0]));
+        carried -= used;
         pthread_mutex_lock(&lock);
+        for (int i = 0; i < npackets; i++)
+            if (packets[i].len)
+                oring[packets[i].index % OPUS_RING] = packets[i];
         t0_ms = index ? t0_ms + (start - t0_ms) / 32 : start;
         if (f.len)
             ring[index % RING] = f;
+        if (index % (60000 / FRAME_MS) == 0 && misses) {
+            log_warn("audio: %d of %d frames not found (ring from %lld ms, oldest asked %d ms ago)",
+                     misses, hits + misses, (long long)(mono_ms() - t0_ms - (index - RING + 1) * FRAME_MS),
+                     lag_max);
+            hits = misses = lag_max = 0;
+        } else if (index % (60000 / FRAME_MS) == 0) {
+            hits = lag_max = 0;
+        }
         pthread_mutex_unlock(&lock);
         index++;
     }
     return NULL;
 }
 
-int audio_start(void) {
+int audio_start(int with_opus) {
     if (running)
         return 0;
     if ((dsp = open("/dev/dsp", O_RDONLY | O_CLOEXEC)) < 0)
@@ -169,10 +216,23 @@ int audio_start(void) {
     }
     for (int i = 0; i < RING; i++)
         ring[i].index = -1;
+    for (int i = 0; i < OPUS_RING; i++)
+        oring[i].index = -1;
+    int err = 0;
+    if (with_opus)
+        opus = opus_encoder_create(RATE, 1, OPUS_APPLICATION_RESTRICTED_LOWDELAY, &err);
+    if (opus) {
+        opus_encoder_ctl(opus, OPUS_SET_BITRATE(OPUS_BITRATE));
+        opus_encoder_ctl(opus, OPUS_SET_VBR(0));
+        opus_encoder_ctl(opus, OPUS_SET_COMPLEXITY(OPUS_COMPLEXITY));
+    } else if (with_opus) {
+        log_warn("audio: no Opus encoder (%d), that track carries silence", err);
+    }
     highpass_init();
     running = 1;
     pthread_create(&thread, NULL, audio_main, NULL);
-    log_info("audio: microphone, AAC-LC %d Hz %d kbit/s", RATE, BITRATE / 1000);
+    log_info("audio: microphone, AAC-LC %d Hz %d kbit/s%s", RATE, BITRATE / 1000,
+             opus ? " and Opus 32 kbit/s" : "");
     return 0;
 }
 
@@ -182,24 +242,63 @@ void audio_stop(void) {
     running = 0;
     pthread_join(thread, NULL);
     api.Uninit(enc);
+    if (opus)
+        opus_encoder_destroy(opus);
+    opus = NULL;
     close(dsp);
     dsp = -1;
     pthread_mutex_lock(&lock);
     for (int i = 0; i < RING; i++)
         ring[i].index = -1;
+    for (int i = 0; i < OPUS_RING; i++)
+        oring[i].index = -1;
     pthread_mutex_unlock(&lock);
 }
 
-size_t audio_frame_at(int64_t t_ms, uint8_t *out) {
+size_t audio_frame_next(int64_t *next, int64_t t_ms, uint8_t *out) {
     size_t len = 0;
     pthread_mutex_lock(&lock);
     if (dsp >= 0 && t_ms >= t0_ms) {
-        int64_t index = (t_ms - t0_ms) / FRAME_MS;
-        struct aframe *f = &ring[index % RING];
-        if (f->index == index) {
+        // The frame after the last one, while that is within a frame of
+        // t_ms: t0_ms moves a little with every read, and a lookup by time
+        // alone repeats or skips a frame whenever t_ms is near a boundary
+        int64_t at = (t_ms - t0_ms) / FRAME_MS;
+        if (*next < at - 1 || *next > at + 1)
+            *next = at;
+        struct aframe *f = &ring[*next % RING];
+        if (f->index == *next) {
             memcpy(out, f->data, f->len);
             len = f->len;
         }
+        ++*next;
+    }
+    if (dsp >= 0) {
+        int lag = (int)(mono_ms() - t_ms);
+        lag_max = lag > lag_max ? lag : lag_max;
+        len ? hits++ : misses++;
+    }
+    pthread_mutex_unlock(&lock);
+    return len;
+}
+
+size_t audio_frame_at(int64_t t_ms, uint8_t *out) {
+    int64_t next = -2;
+    return audio_frame_next(&next, t_ms, out);
+}
+
+size_t audio_opus_next(int64_t *next, int64_t t_ms, uint8_t *out) {
+    size_t len = 0;
+    pthread_mutex_lock(&lock);
+    if (dsp >= 0 && t_ms >= t0_ms) {
+        int64_t at = (t_ms - t0_ms) / AUDIO_OPUS_MS;
+        if (*next < at - 1 || *next > at + 1)
+            *next = at;
+        struct oframe *o = &oring[*next % OPUS_RING];
+        if (o->index == *next) {
+            memcpy(out, o->data, o->len);
+            len = o->len;
+        }
+        ++*next;
     }
     pthread_mutex_unlock(&lock);
     return len;
@@ -207,9 +306,11 @@ size_t audio_frame_at(int64_t t_ms, uint8_t *out) {
 
 #else  // no OSS on this host
 
-int audio_start(void) { return -1; }
+int audio_start(int with_opus) { return -1; }
 void audio_set_volume(int volume) {}
 void audio_stop(void) {}
 size_t audio_frame_at(int64_t t_ms, uint8_t *out) { return 0; }
+size_t audio_frame_next(int64_t *next, int64_t t_ms, uint8_t *out) { return 0; }
+size_t audio_opus_next(int64_t *next, int64_t t_ms, uint8_t *out) { return 0; }
 
 #endif

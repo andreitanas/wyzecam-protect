@@ -5,6 +5,8 @@ cd "$(dirname "$0")/.."
 T=build/test
 mkdir -p $T
 
+python3 -I test/test_trailer_clock.py
+
 if [ ! -f $T/clip.h264 ]; then
     ffmpeg -loglevel error -y -f lavfi -i testsrc2=size=640x360:rate=25 -t 4 \
         -c:v libx264 -profile:v main -bf 0 -g 10 -pix_fmt yuv420p -f h264 $T/clip.h264
@@ -28,11 +30,17 @@ d = open(sys.argv[1], "rb").read()
 out = bytearray(d[:9]) + bytes(4)
 out[4] = 5
 i = 13
+last_av = 0
 while i + 11 <= len(d):
     size = int.from_bytes(d[i + 1:i + 4], "big")
     if i + 15 + size > len(d):
         break
-    out += d[i:i + 15 + size]
+    if d[i] in (8, 9):
+        ts = int.from_bytes(d[i + 4:i + 7], "big") | d[i + 7] << 24
+        assert ts >= last_av, f"audio/video timestamp went backwards: {last_av} -> {ts}"
+        last_av = ts
+    if d[i] != 10:  # the Opus track is UniFi's own tag type
+        out += d[i:i + 15 + size]
     i += 15 + size + 16
 open(sys.argv[2], "wb").write(out)
 EOF

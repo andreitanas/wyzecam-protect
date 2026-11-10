@@ -243,6 +243,15 @@ void source_subscribe(struct source *s, struct queue *q) {
     q->next = s->subs;
     s->subs = q;
     pthread_mutex_unlock(&s->lock);
+    source_request_keyframe(s);
+}
+
+void source_request_keyframe(struct source *s) {
+    pthread_mutex_lock(&s->lock);
+    void (*request_keyframe)(struct source *) = s->request_keyframe;
+    pthread_mutex_unlock(&s->lock);
+    if (request_keyframe)
+        request_keyframe(s);
 }
 
 void source_unsubscribe(struct source *s, struct queue *q) {

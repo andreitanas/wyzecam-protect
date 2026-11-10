@@ -191,6 +191,9 @@ static void *objects_main(void *arg) {
 
         struct smart_result res;
         int w, h;
+        // The frame's time: detections are dated by it, not by when the
+        // detector is done with it
+        int64_t mono = mono_ms(), wall = wall_ms();
         if (!active || !smart_any_enabled(&smart) ||
             capture_raw(nv12, frame * 3 / 2, &w, &h, 1) < 0) {
             // Idle: let tracked objects time out and leave.
@@ -227,7 +230,7 @@ static void *objects_main(void *arg) {
         log_debug("objects: %d found in %dx%d region at %dx%d, %lld ms", n, reg[2], reg[3], in_w,
                   in_h, (long long)took);
 
-        smart_update(&smart, dets, n, mono_ms(), wall_ms(), w, h, &res);
+        smart_update(&smart, dets, n, mono, wall, w, h, &res);
         for (int i = 0; i < res.nsnap; i++) {
             const int *f = res.framing[i];
             int fx = f[0] * w / 1000, fy = f[1] * h / 1000, fw = f[2] * w / 1000, fh = f[3] * h / 1000;

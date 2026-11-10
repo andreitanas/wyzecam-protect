@@ -27,7 +27,7 @@ int main(int argc, char **argv) {
     FILE *out = fopen(argv[2], "wb");
     struct flv flv;
     int started = 0;
-    int64_t first = 0, end = mono_ms() + atoi(argv[3]) * 1000;
+    int64_t end = mono_ms() + atoi(argv[3]) * 1000;
     while (mono_ms() < end) {
         struct frame *f = queue_pop(&q, 1000);
         if (!f)
@@ -41,12 +41,11 @@ int main(int argc, char **argv) {
                 if (h264_type(nal) == NAL_PPS)
                     pps = nal, pl = n;
             }
-            flv_begin(&flv, "testStream", src.width, src.height, 25, 1);
+            flv_begin(&flv, "testStream", 1, src.width, src.height, 25, 2, 0, f->ts_ms);
             flv_avc_config(&flv, sps, sl, pps, pl);
-            first = f->ts_ms;
             started = 1;
         }
-        flv_video(&flv, (uint32_t)(f->ts_ms - first), f->key, f->data, f->len);
+        flv_video(&flv, f->ts_ms, f->key, f->data, f->len);
         fwrite(flv.out.p, 1, flv.out.len, out);
         flv.out.len = 0;
         frame_unref(f);

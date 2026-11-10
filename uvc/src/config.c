@@ -47,7 +47,7 @@ static void defaults(struct config *c) {
     c->lo_width = 640;
     c->lo_height = 360;
     c->fps = 25;
-    c->audio = 1;
+    c->audio = 2;
     c->allow_reboot = 1;
 }
 
