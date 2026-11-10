@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include "fastconv.h"
 #include "net.h"
 
 struct detector {
@@ -40,6 +41,7 @@ struct detector *detector_open(const char *model) {
     detector *d = new detector;
     d->net.opt.num_threads = 1;
     d->net.opt.lightmode = true;
+    fastconv_register(d->net);
     char path[256];
     snprintf(path, sizeof(path), "%s.param", model);
     int rc = d->net.load_param(path);

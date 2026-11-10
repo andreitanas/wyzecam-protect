@@ -7,12 +7,15 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include <algorithm>
 #include <vector>
 
 #include "benchmark.h"
 #include "net.h"
+
+#include "../src/fastconv.h"
 
 static const char *coco[] = {
     "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck", "boat",
@@ -30,6 +33,12 @@ struct box {
     int label;
     float score, x1, y1, x2, y2; // normalized 0..1
 };
+
+static double cpu_ms() { // this process's CPU time: uvcd may be running too
+    struct timespec t;
+    clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &t);
+    return t.tv_sec * 1e3 + t.tv_nsec / 1e6;
+}
 
 static long peak_rss_kb() {
     FILE *fp = fopen("/proc/self/status", "r");
@@ -130,14 +139,17 @@ int main(int argc, char **argv) {
     ncnn::Net net;
     net.opt.num_threads = 1;
     net.opt.lightmode = true;
+    const char *own = getenv("NCNN_CONV"); // uvcd's convolution layers, unless told to time ncnn's
+    if (!own || !*own)
+        fastconv_register(net);
     if (net.load_param(argv[1]) || net.load_model(argv[2])) {
         fprintf(stderr, "cannot load model\n");
         return 1;
     }
 
-    double total = 0, best = 1e9, worst = 0;
+    double total = 0, best = 1e9, worst = 0, cpu = 0;
     for (int it = 0; it < iters; it++) {
-        double t0 = ncnn::get_current_time();
+        double t0 = ncnn::get_current_time(), c0 = cpu_ms();
         ncnn::Mat in = ncnn::Mat::from_pixels_resize(rgb, ncnn::Mat::PIXEL_RGB, w, h, iw, ih);
         const float mean[3] = {0, 0, 0}, norm[3] = {1 / 255.f, 1 / 255.f, 1 / 255.f};
         in.substract_mean_normalize(mean, norm);
@@ -164,13 +176,14 @@ int main(int argc, char **argv) {
         } else {
             // First run includes one-time allocations; time the rest.
             total += dt;
+            cpu += cpu_ms() - c0;
             best = dt < best ? dt : best;
             worst = dt > worst ? dt : worst;
         }
     }
     if (iters > 1)
-        printf("%dx%d: mean %.0f ms, min %.0f, max %.0f over %d runs; peak RSS %ld KB\n", iw, ih,
-               total / (iters - 1), best, worst, iters - 1, peak_rss_kb());
+        printf("%dx%d: mean %.0f ms (%.0f ms of CPU), min %.0f, max %.0f over %d runs; peak RSS %ld KB\n",
+               iw, ih, total / (iters - 1), cpu / (iters - 1), best, worst, iters - 1, peak_rss_kb());
     free(rgb);
     return 0;
 }

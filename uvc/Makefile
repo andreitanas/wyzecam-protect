@@ -59,6 +59,11 @@ $(NCNN_CAMERA):
 		$(NCNN_OPTS) -DNCNN_RUNTIME_CPU=OFF >/dev/null
 	ninja -C build/ncnn-camera >/dev/null
 
+# The convolution kernels: speed over size, and no -ffast-math (it lets the
+# compiler merge the separate sums the kernels are written around).
+FASTCONV_FLAGS := -O3 -ffp-contract=fast -fno-math-errno -fno-trapping-math
+build/host/src/fastconv.o build/camera/src/fastconv.o: CXXFLAGS_COMMON += $(FASTCONV_FLAGS)
+
 build/host/%.o: %.cpp | $(NCNN_HOST)
 	@mkdir -p $(dir $@)
 	$(HOST_CXX) $(CXXFLAGS_COMMON) -Ibuild/ncnn-host/src -c $< -o $@
@@ -136,7 +141,19 @@ build/test_audio-mipsel: test/test_audio.c build/camera/src/audio.o build/camera
 		$(addprefix build/camera/,$(patsubst %.c,%.o,$(filter $(VOAAC)/%,$(DEP_SRC))))
 	$(CAMERA_CC) $(CFLAGS_COMMON) -static -s -Wl,--gc-sections -o $@ $^ -lpthread -lm
 
-test: build/test_flv build/test_motion build/test_smart build/test_stream_reply build/test_flv_timeline
+build/test_fastconv: build/host/test/test_fastconv.o build/host/src/fastconv.o $(NCNN_HOST)
+	$(HOST_CXX) -o $@ $^ -lpthread
+
+# The same with the kernels under the address sanitizer: their group tails
+# and row buffers index close to the ends of ncnn's blobs.
+build/test_fastconv_asan: test/test_fastconv.cpp src/fastconv.cpp $(NCNN_HOST)
+	$(HOST_CXX) -std=c++11 -g -O1 -fsanitize=address,undefined -fno-rtti -Isrc -Ibuild/ncnn-host/src \
+		-I$(NCNN)/src -o $@ $^ -lpthread
+
+test: build/test_flv build/test_motion build/test_smart build/test_stream_reply build/test_flv_timeline \
+		build/test_fastconv build/test_fastconv_asan
+	./build/test_fastconv third_party/models/yolo-fastest-1.1 2>&1 | grep -v "^overwrite built-in"
+	./build/test_fastconv_asan third_party/models/yolo-fastest-1.1 2>&1 | grep -c "largest difference"
 	./build/test_motion
 	./build/test_smart
 	./build/test_stream_reply
