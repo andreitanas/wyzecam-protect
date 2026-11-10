@@ -82,23 +82,35 @@ console attached:
   minute, for the night test below; stop it and delete both when done. It
   was restarted by hand after the 23:21 reboot (a `---` line in the log
   marks it); a reboot stops it. The image flashed then (the trimmed kernel,
-  [Kernel size](#kernel-size)) has the audio limiter. Since 2026-11-10 uvcd
-  runs from the SD card again (`/sdcard/uvc/uvcd`): the build that Protect's
-  mobile apps play ([`protect-streaming.md`](protect-streaming.md)), which
-  the flashed image does not have; delete it once an image with it and
-  kernel patch 0016 is flashed.
+  [Kernel size](#kernel-size)) has the audio limiter. It was started again
+  after the flash of 2026-11-10.
+- Flashed 2026-11-10 17:29 UTC and kept: the image with kernel patch 0016
+  and the uvcd of that day (the stream Protect's mobile apps play,
+  [`protect-streaming.md`](protect-streaming.md), and the detector's own
+  layers). uvcd runs from flash again (`/rom/uvc/uvcd`); the test builds
+  and benchmarks on the SD card are deleted. Checked before keeping: WiFi
+  and SSH, the SD card, a write to /config, the video nodes, `/dev/dsp`,
+  the watchdog, all three streams to Protect, detections at 0.68 s a pass,
+  and no `GetFPS invalid` or `FeedData` lines in Protect's media server
+  log. Flashed again at 19:39 UTC with uvcd's own malloc
+  ([Memory allocator](#memory-allocator)) and temporal noise reduction on:
+  in the 7 minutes after, with a movie in view and 79 snapshot uploads,
+  every minute 1500 or 1501 frames on each stream and no warnings, but the
+  picture broke ([Temporal noise reduction](#temporal-noise-reduction)).
+  Flashed a third time with it off.
 - Protect's mobile apps (2026-11-10): they played clicks for audio and
   waited seconds after a switch to the camera; uvcd's stream now follows a
   UniFi camera's (64-bit clock ticks, an Opus track, answers to latency
-  probes), in [`protect-streaming.md`](protect-streaming.md). Open from it:
-  temporal noise reduction is off in uvcd (with the detector running it
-  broke the 1080p frames and the audio), which the GEN32 decision above did
-  not know.
+  probes), in [`protect-streaming.md`](protect-streaming.md). Temporal noise reduction is still off in uvcd
+  ([below](#temporal-noise-reduction)).
 - The object detector is back on on the test camera (2026-11-10) and takes
   0.7 s a pass instead of 1.4 s, with convolution layers of uvcd's own
   ([Object detector](#object-detector)); Protect's app shows its
-  detections. It runs from the SD card like the rest of this uvcd.
-- Next: an image with this uvcd and patch 0016; night mode in real darkness (the day/night thresholds were measured
+  detections.
+- The streams stalled for 0.3 to 5 s whenever the detector was preempted
+  inside malloc (2026-11-10): zig's libc malloc spins. uvcd has its own now
+  ([Memory allocator](#memory-allocator)).
+- Next: night mode in real darkness (the day/night thresholds were measured
   under the vendor's ISP; uvcd's exposure figure follows the same formula
   but has not seen a dark room yet: read `/sdcard/nightlog.txt` after a
   night), shading (needs a flat field), the speaker for talkback (the test
@@ -432,6 +444,68 @@ timestamp step 41 ms).
   looked at with.
 - `uvc/bench/prof.sh` prints a model's per-layer times on the camera (the
   fastest of 8 runs, since uvcd keeps running).
+
+### Memory allocator
+
+uvcd on the camera uses Doug Lea's malloc (`uvc/src/camera_malloc.c`,
+`third_party/dlmalloc`), not the one in zig's libc.
+
+**Decision (2026-11-10): uvcd brings its own malloc, with a lock that
+sleeps.** zig 0.17's libc gives musl targets Zig's `SmpAllocator` in place of
+musl's malloc. It keeps one lock per CPU and, when a thread finds its lock
+taken, tries the next CPU's in a loop without sleeping. The T20 has one CPU,
+so one lock. When the detector thread (nice 19) was preempted holding it,
+every other thread that called malloc spun at normal priority, and the
+detector got no time to release it. Both capture threads stood in `malloc`
+for 0.3 to 5 s and the streams lost that many frames (uvcd's `video timestamp
+step` warnings). It needs other threads busy at that moment: seen once a
+minute or two with a movie in view (Protect asks for three or four
+snapshot uploads an event), not at all in three hours of an empty scene.
+
+- Found with: the time of each step of the capture loop; `/proc/<pid>/task/*`
+  CPU times across a stall (six threads with equal user time, the detector
+  with none); the program counters of all threads, taken in a signal handler
+  (`heap.SmpAllocator.alloc`).
+- Under the same load (a 0.6 s burst of CPU every second): 3 stalls of 0.56
+  to 1.0 s in 3 minutes before, one of 0.28 s in 6 minutes after. What is
+  left is the ordinary priority inversion: waiters sleep until the detector
+  runs again. Linux does not pass nice levels through priority-inheriting
+  locks, so the detector's time under the lock was cut instead: its input
+  picture (0.7 MB, a memory mapping made and dropped each pass) and the
+  scaled copy are kept between passes (`detector.cpp`). With both, 10 minutes
+  of the movie and 80 uploads: every minute 1501 frames, largest step 41 ms.
+- Not the cause, measured on the way: a TLS handshake to Protect is 90 ms of
+  CPU (TLS 1.3, `test/test_tls.c`), a whole snapshot upload 0.1 to 0.24 s.
+  Protect's upload ports (7444, 6666) refuse plain HTTP.
+- zig's libc exports its allocator weakly, so the definitions in
+  `camera_malloc.c` replace it for libc's own callers too. Check after a zig
+  upgrade: `nm` of an unstripped link must show no `SmpAllocator`.
+- Temporal noise reduction was tried again with this malloc and stays off
+  ([below](#temporal-noise-reduction)): its fault is another one.
+
+### Temporal noise reduction
+
+**Decision (2026-11-10): Temper stays off in uvcd** (`apply_isp` sets the
+control to 0), as since 2026-10-28. With uvcd's own malloc it ran for 5.5
+minutes with no warning in uvcd's log and was flashed on at 19:39 UTC.
+Within 15 minutes Protect showed a broken picture (user): the whole frame
+shifted about 650 pixels to the right and wrapped, green left of the seam and
+magenta right of it (the Bayer phase is off), on all streams, with frame
+counts and timestamps in the log still perfect. Setting the control to 0 on
+the running ISP did not repair it; restarting uvcd did. This is what "broke
+the 1080p frames" meant in October; uvcd cannot see it.
+
+- Not found: what throws the ISP's input out of step. Temper adds 8.3 MB a
+  frame of reads and as much of writes to the memory bus, next to the
+  detector and two encoders; the vendor's ISP runs it on this hardware, with
+  a 4.1 MB buffer. To try: the RAW16 buffer under the same load, and what
+  the ISP's input port status says when it happens.
+- A single `v4l2grab` on `/dev/video0` while uvcd streamed (what
+  `nightlog.sh` does every minute) did not do it.
+- `uvc/tools/streamsnap.sh out.jpg` takes a picture of what the camera is
+  sending right now, from a capture on the NVR: the way to see such a fault,
+  since snapshots and frame statistics show nothing.
+- Pictures of it: `uvc/build/av-debug/2026-11-10-tnr-broken/` (ignored).
 
 ### WDR
 
