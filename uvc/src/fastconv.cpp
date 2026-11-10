@@ -185,6 +185,25 @@ static inline void dw_group(const float *const *rows, int x, const float *__rest
         s[j] = bias;
     for (int ky = 0; ky < K; ky++) {
         const float *__restrict r = rows[ky] + x;
+        if (S == 1 && K == 3) {
+            // Neighbouring pixels share their inputs: load a row's once
+            float p[G + 2], w0 = k[ky * 3], w1 = k[ky * 3 + 1], w2 = k[ky * 3 + 2];
+            for (int j = 0; j < G + 2; j++)
+                p[j] = r[j];
+            for (int j = 0; j < G; j++) {
+                s[j] += p[j] * w0;
+                KEEP(s[j]);
+            }
+            for (int j = 0; j < G; j++) {
+                s[j] += p[j + 1] * w1;
+                KEEP(s[j]);
+            }
+            for (int j = 0; j < G; j++) {
+                s[j] += p[j + 2] * w2;
+                KEEP(s[j]);
+            }
+            continue;
+        }
         for (int kx = 0; kx < K; kx++) {
             float wv = k[ky * K + kx];
             for (int j = 0; j < G; j++) {

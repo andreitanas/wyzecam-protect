@@ -204,6 +204,7 @@ static void *objects_main(void *arg) {
             continue;
         }
 
+        int64_t t_frame = mono_ms();
         nv12_to_rgb(nv12, w, h, rgb);
         int reg[4];
         detect_region(box, w, h, reg);
@@ -227,8 +228,9 @@ static void *objects_main(void *arg) {
             log_debug("objects: %s %.2f at %.0f,%.0f %.0fx%.0f", detect_class_name(dets[i].cls),
                       dets[i].score, dets[i].x * w, dets[i].y * h, dets[i].w * w, dets[i].h * h);
         }
-        log_debug("objects: %d found in %dx%d region at %dx%d, %lld ms", n, reg[2], reg[3], in_w,
-                  in_h, (long long)took);
+        log_debug("objects: %d found in %dx%d region at %dx%d, %lld ms (frame %lld, to RGB %lld)", n,
+                  reg[2], reg[3], in_w, in_h, (long long)took, (long long)(t_frame - mono),
+                  (long long)(t0 - t_frame));
 
         smart_update(&smart, dets, n, mono, wall, w, h, &res);
         for (int i = 0; i < res.nsnap; i++) {

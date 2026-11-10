@@ -415,10 +415,21 @@ timestamp step 41 ms).
   layers it takes 0.64 s at 352x192 against 0.71 s, and on the test scene it
   adds two boxes the width of the picture. **8-bit models**: integer
   multiply-adds are slower than float ones here.
-- Left: the last 1x1 convolution computes 255 channels (80 classes for each
-  of 3 anchors) of which Protect's three types need 63 (37 ms of the 0.7 s);
-  the input's conversion and scaling (about 35 ms); the depthwise kernels
-  are at 10 ns a multiply-add where the FPU allows about 5.
+- Depthwise 3x3 at stride 1 loads each row's inputs once for the three taps
+  that use them: 10 ms less a pass. The depthwise layers remain at about
+  9 ns a multiply-add against 4.4 to 7 for 1x1: what is left there is per
+  pixel (the activation, the store, the row copy), not the sums.
+- Rejected: **leaving out the classes Protect has no type for** in the last
+  1x1 convolutions (255 channels, 80 classes for each of 3 anchors; about
+  30 ms of a pass). ncnn's detection layer gives a box its best class, so a
+  couch seen as a couch today would come out as its next best guess, a
+  person perhaps.
+- Left: a pass spends about 27 ms turning the whole NV12 frame into RGB and
+  about 30 ms scaling and normalizing it (logged with each pass at debug
+  level), 8% of it. Going from NV12 to the model's input in one step would
+  save most of that, but the RGB frame also feeds the snapshots, and the
+  result would no longer be the bilinear scaling the detections were
+  looked at with.
 - `uvc/bench/prof.sh` prints a model's per-layer times on the camera (the
   fastest of 8 runs, since uvcd keeps running).
 
