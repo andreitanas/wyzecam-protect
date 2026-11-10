@@ -1,0 +1,22 @@
+From: uvc <uvc@local>
+Subject: [PATCH] media: ingenic: t20-h264: advertise frame rate in SPS VUI
+
+Protect ignores the FLV frame-rate metadata when the SPS omits timing,
+defaults to 30 fps, and reports invalid frame-rate numerator/denominator.
+Describe the configured progressive frame interval in the SPS itself.
+
+diff --git a/drivers/media/platform/ingenic/t20-vpu-h264.c b/drivers/media/platform/ingenic/t20-vpu-h264.c
+--- a/drivers/media/platform/ingenic/t20-vpu-h264.c
++++ b/drivers/media/platform/ingenic/t20-vpu-h264.c
+@@ -589,7 +589,10 @@ static u32 t20_h264_sps(struct t20_h264_ctx *ctx, u8 *buf)
+ 	t20_h264_put(&b, 8, 13);		/* transfer: sRGB */
+ 	t20_h264_put(&b, 8, 6);			/* matrix: BT.601 */
+ 	t20_h264_put(&b, 1, 0);			/* chroma_loc_info_present */
+-	t20_h264_put(&b, 1, 0);			/* timing_info_present */
++	t20_h264_put(&b, 1, 1);			/* timing_info_present */
++	t20_h264_put(&b, 32, ctx->timeperframe.numerator);	/* num_units_in_tick */
++	t20_h264_put(&b, 32, ctx->timeperframe.denominator * 2); /* time_scale */
++	t20_h264_put(&b, 1, 1);			/* fixed_frame_rate_flag */
+ 	t20_h264_put(&b, 1, 0);			/* nal_hrd_parameters_present */
+ 	t20_h264_put(&b, 1, 0);			/* vcl_hrd_parameters_present */
+ 	t20_h264_put(&b, 1, 0);			/* pic_struct_present */
