@@ -1,4 +1,4 @@
-From: openmico_onvif <andrei.tanas@gmail.com>
+From: wyzecam-protect <andrei.tanas@gmail.com>
 Subject: [PATCH] dmaengine: jz4780: status of a terminated transfer
 
 ALSA's sync_stop asks for the status of the cyclic transfer after

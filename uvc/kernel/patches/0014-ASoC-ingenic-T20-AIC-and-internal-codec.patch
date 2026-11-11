@@ -1,4 +1,4 @@
-From: openmico_onvif <andrei.tanas@gmail.com>
+From: wyzecam-protect <andrei.tanas@gmail.com>
 Subject: [PATCH] ASoC: ingenic: T20 AIC and internal codec
 
 The T20's AIC is the JZ4780 generation's (FIFO thresholds, separate capture

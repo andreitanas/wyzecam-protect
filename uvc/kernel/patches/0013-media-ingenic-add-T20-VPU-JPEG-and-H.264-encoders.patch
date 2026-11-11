@@ -1,4 +1,4 @@
-From: openmico_onvif <andrei.tanas@gmail.com>
+From: wyzecam-protect <andrei.tanas@gmail.com>
 Subject: [PATCH] media: ingenic: add T20 VPU JPEG and H.264 encoders
 
 V4L2 mem2mem encoders on the T20's VPU, one driver with a video node for

@@ -1,4 +1,4 @@
-From: openmico_onvif <andrei.tanas@gmail.com>
+From: wyzecam-protect <andrei.tanas@gmail.com>
 Subject: [PATCH] media: ingenic: add T20 camera input and ISP driver
 
 First version: parallel Bayer sensor in through the VIC, NV12 out of the
@@ -78,7 +78,7 @@ index 000000000..076de7775
 + * colour space converter with brightness, contrast and saturation; the blocks that need
 + * calibration tables (shading, noise reduction, Iridix) are bypassed.
 + *
-+ * Written from docs/t20-isp-hardware.md (openmico_onvif), which records the
++ * Written from docs/t20-isp-hardware.md (wyzecam-protect), which records the
 + * register map and sequences used here.
 + */
 +

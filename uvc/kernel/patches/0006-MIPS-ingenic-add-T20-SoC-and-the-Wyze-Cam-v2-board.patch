@@ -1,5 +1,5 @@
 From 514724d42e6655dd17690e987c79f279753fedca Mon Sep 17 00:00:00 2001
-From: openmico_onvif <andrei.tanas@gmail.com>
+From: wyzecam-protect <andrei.tanas@gmail.com>
 Date: Tue, 27 Oct 2026 01:20:38 +0000
 Subject: [PATCH 06/10] MIPS: ingenic: add T20 SoC and the Wyze Cam v2 board
 

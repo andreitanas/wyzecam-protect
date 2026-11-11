@@ -1,4 +1,4 @@
-From: openmico_onvif <andrei.tanas@gmail.com>
+From: wyzecam-protect <andrei.tanas@gmail.com>
 Subject: [PATCH] media: i2c: add SOI JX-F22/JX-F23 sensor driver
 
 V4L2 sensor subdevice for the Wyze Cam v2 image sensors (1080p, 10-bit
