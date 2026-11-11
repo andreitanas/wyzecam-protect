@@ -38,8 +38,8 @@ as the default (`image/build.sh`, `image/flash.sh` are unchanged in behaviour).
 
 ## Where this stopped
 
-On branch `kernel-modern`, with one camera on the new kernel and a serial
-console attached:
+On branch `main` (`kernel-modern` until 2026-11-10), with one camera on the
+new kernel and a serial console attached:
 
 - Runs on the camera: hardware test steps 1, 2, 4, 5, 6 and 7 (boot, flash and
   config, SD card, WiFi and SSH, the watchdog, the camera with `v4l2grab`,

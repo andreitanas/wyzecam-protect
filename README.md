@@ -1,61 +1,113 @@
-## Wyze Cam v2 as a native UniFi Protect camera
+# wyzecam-protect
 
-`uvc/` builds a firmware image for Ingenic T20 Wyze Cam v2 cameras that
-makes them adopt into UniFi Protect as UniFi cameras: video, snapshots,
-motion and smart detections (person, vehicle, animal), with no RTSP, ONVIF
-or bridge box.
+Firmware that makes a Wyze Cam v2 (Ingenic T20) adopt into UniFi Protect as a
+UniFi camera: video, audio, snapshots, motion and smart detections (person,
+vehicle, animal), with no RTSP, ONVIF or bridge box.
 
-- `uvcd`, a static C daemon, drives the camera through Ingenic's libimp and
-  speaks Protect's own camera protocol. It runs the object detector (ncnn,
-  Yolo-Fastest) on the camera.
-- The image keeps [OpenMiko](https://github.com/openmiko/openmiko)'s kernel
-  and replaces the rest: a minimal root filesystem (busybox, dropbear,
-  wpa_supplicant, the camera and WiFi drivers) plus uvcd, in the root flash
-  partition. Settings live in the config flash partition, so the SD card is
-  optional.
+- **`uvcd`**, a static C daemon, speaks Protect's own camera protocol and
+  streams as UniFi's cameras do, so Protect's web and mobile apps play it.
+  It runs the object detector (ncnn, Yolo-Fastest) on the camera.
+- **Linux 6.18** with our drivers for the T20: clocks, pins, the image
+  sensor, the ISP, the H.264 and JPEG encoders and the microphone. uvcd
+  uses them through V4L2 and ALSA. (The binary still links Ingenic's closed
+  libimp, which it only uses on the old vendor kernel.)
+- **The image** is a kernel and a read-only squashfs root (busybox, dropbear,
+  wpa_supplicant, the modules, uvcd) in the camera's flash. Settings live in
+  the config flash partition, so the SD card is optional.
+
+This is not a product of, or endorsed by, Wyze or Ubiquiti.
+
+## Status
+
+It runs on one Wyze Cam v2 (JX-F22 sensor), every day, with UniFi Protect on
+a UniFi OS console. `docs/kernel-modern.md` has the full state. Known gaps:
+
+- The speaker is not driven: no talkback.
+- Night mode switches the IR filter and LEDs, but its switching points have
+  not been checked in a dark room yet.
+- The JX-F23 sensor (later Wyze Cam v2 units) has a driver table and has not
+  been run.
+- Installing the new-kernel image with the setup button has not been tried;
+  see Install.
 
 ## Build
-- `cd uvc && ./fetch-deps.sh` once, then `image/build.sh`. It produces:
-  - `build/image/root.jffs2`, the root partition;
-  - `build/image/demo.bin`, the same image in the bootloader's format, with
-    OpenMiko's kernel.
-- The base root filesystem comes from OpenMiko's `demo.bin`, expected at
-  `deploy/demo.bin` (from https://github.com/openmiko/openmiko/releases).
+
+Needs zig (0.17), python3, squashfs-tools, and for the kernel a Linux x86_64
+host or Docker (`docs/kernel-modern.md`, Building).
+
+```sh
+cd uvc
+./fetch-deps.sh             # third-party sources, once
+kernel/build.sh             # Linux: build/kernel/out/ (uImage, modules)
+image/build-modern.sh       # build/image-modern/{uImage,root.sqfs,demo.bin}
+```
+
+- The base root filesystem comes from an
+  [OpenMiko](https://github.com/openmiko/openmiko/releases) `demo.bin`,
+  expected at `deploy/demo.bin`.
 - `./deploy.sh utils` and `./deploy.sh passwd` generate the camera's
-  settings: wifi, hostname, root password and ssh key, under
+  settings (WiFi, hostname, root password, SSH key) under
   `deploy/config/overlay`.
+- `make -C uvc test` runs uvcd's tests on the host.
 
 ## Install
-- **New camera:**
-  1. Run `uvc/make-sdcard.sh /Volumes/CARD`. The card has nothing per
-     camera: each camera names itself after its MAC (`wyze-2BE8`) and makes
-     its own certificate, so one card sets up any number of cameras.
-  2. Hold the setup button while powering the camera on. The bootloader
-     flashes `demo.bin`.
-  3. The camera imports `config/` from the card into its flash at every boot
-     when the card's copy differs, then shows up in Protect as ready to
-     adopt (it answers Protect's discovery). Click Adopt there.
-  - Protect's discovery only reaches its own subnet. Elsewhere set `NVR_HOST`
-    and `ADOPTION_TOKEN` in `config/uvc/uvcd.conf` instead (see the comments
-    there).
-- **Camera already running this image or OpenMiko:** `uvc/image/flash.sh
-  [camera-ip]` writes `root.jffs2` over ssh. It verifies the result and puts
-  the previous image back if anything doesn't match.
-  - Coming from OpenMiko, first put `uvcd.conf`, `client.pem` (and
-    `uvcd.state` if already adopted) in `/config/uvc/`.
-- **Removing a camera** in Protect resets it: it forgets that Protect and
-  shows up as ready to adopt again.
-  - Remove OpenMiko's init scripts and `openmiko.conf` from
-    `/config/overlay/etc/` and from the card's `config/overlay/etc/`.
 
-## Notes
-- On the camera:
-  - uvcd logs to `/tmp/uvcd.log`; the system log is `/var/log/messages`.
-    Both are size-capped in RAM.
-  - `/sdcard/uvc/uvcd`, if present, runs instead of the flashed uvcd (for
-    development).
-- OpenMiko's initramfs zeroes the root partition from block 274 up on every
-  boot and deletes its contents if `rootfs.tar.xz` fails to unpack. Never
-  write that partition except through `image/flash.sh` or `demo.bin`.
-- `docs/firmware-review.md` has the review of OpenMiko that led to this
-  image.
+The tested way onto the new kernel is over SSH from a camera that already
+runs this firmware, with either kernel. A new camera therefore takes two
+steps.
+
+1. **New camera: the vendor-kernel image by SD card.**
+   1. Run `uvc/make-sdcard.sh /Volumes/CARD`. It builds `image/build.sh`'s
+      image (OpenMiko's 3.10 kernel) and copies it with your settings. The
+      card has nothing per camera: each camera names itself after its MAC
+      (`wyze-2BE8`) and makes its own certificate.
+   2. Hold the setup button while powering the camera on. The bootloader
+      flashes `demo.bin`.
+   3. Take `demo.bin` off the card once the camera is up and keep it: it is
+      the recovery image.
+2. **The new kernel over SSH:** `uvc/image/flash-modern.sh [camera-ip]`. It
+   saves the running image to the SD card, writes and verifies the kernel
+   and root partitions, and reboots.
+   - The first boots are trials. Check the camera, then run `rollback keep`
+     on it within 10 minutes; otherwise it puts the saved image back.
+   - The same command updates a camera that already runs the new kernel.
+
+**Recovery:** put the vendor-kernel `demo.bin` on the SD card, hold the setup
+button and power on.
+
+**Adopting:** the camera answers Protect's discovery and shows up there as
+ready to adopt. Protect's discovery only reaches its own subnet; elsewhere
+set `NVR_HOST` and `ADOPTION_TOKEN` in `config/uvc/uvcd.conf` (see the
+comments in `uvc/image/uvcd.conf.template`). Removing the camera in Protect
+resets it to ready to adopt.
+
+## On the camera
+
+- SSH as root with your key (`deploy.sh passwd` installs your public key).
+- uvcd logs to `/tmp/uvcd.log`, the system to `/tmp/messages`; both are in
+  RAM and size-capped.
+- Settings: `/config/uvc/uvcd.conf`.
+- `/sdcard/uvc/uvcd`, if present, runs instead of the flashed uvcd, for
+  development.
+- `isptool input` says whether the camera input is in step with the sensor;
+  `v4l2grab`, `v4l2jpeg` and `v4l2h264` test the drivers without uvcd.
+
+## The vendor kernel
+
+uvcd first ran on OpenMiko's 3.10 kernel through Ingenic's libimp, and
+`uvc/image/build.sh` and `flash.sh` still build and write that image. Nothing
+tests it any more. The tag `vendor-kernel` is the last commit that was run
+that way.
+
+## Layout and documents
+
+- `uvc/src` uvcd; `uvc/kernel` the kernel's configuration, device tree and
+  patches; `uvc/image` the image and flash scripts; `uvc/capture` driver
+  test tools; `uvc/tools` scripts for looking at streams and captures.
+- `docs/kernel-modern.md`: the kernel, what was ported from where, the
+  camera stack, decisions with their dates, the hardware test plan.
+- `docs/t20-isp-hardware.md`: the T20's camera input, ISP, encoders and
+  audio as verified on hardware.
+- `docs/protect-streaming.md`: the stream Protect expects from a camera.
+- `docs/firmware-review.md`, `docs/kernel-and-sdk.md`: the review of
+  OpenMiko and of the vendor kernel and SDK that led here.
