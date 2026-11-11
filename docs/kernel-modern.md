@@ -23,7 +23,7 @@ them to H.264 and JPEG, and uvcd streams them to Protect (2026-10-28). Read
 | Watchdog | mainline `jz4740_wdt` | runs: `/dev/watchdog`, an unfed watchdog resets the SoC |
 | I2C (sensor bus) | mainline `i2c-jz4780` | runs |
 | WiFi, RTL8189FS on MSC1 | jwrdegoede/rtl8189ES_linux (out of tree), cfg80211 module; SDIO transfers by DMA | runs: WPA, DHCP, SSH; with both streams going out, the kernel's share of the CPU went from 31% (PIO) to 11% (DMA) |
-| Squashfs root on mtdblock2 | `image/build-modern.sh`, `image/flash-modern.sh` | runs; installed over SSH |
+| Squashfs root on mtdblock2 | `image/build.sh`, `image/flash.sh` | runs; installed over SSH |
 | Sensor JX-F22/JX-F23 | ours, `jxf2x` (patch 0011; register tables from Ingenic's GPL sensor drivers) | runs (JX-F22): 1080p, exposure, gain, mirror and flip controls |
 | ISP | ours, `t20-isp` (patch 0012), from [`t20-isp-hardware.md`](t20-isp-hardware.md) | runs: 1920x1080 NV12 at 24.6 fps in colour: black level, auto white balance, colour matrix, sRGB gamma, noise reduction, sharpening, brightness/contrast/saturation |
 | JPEG encoder (VPU) | ours, `t20-vpu` (patch 0013; the VPU sequence and Huffman table from Ingenic's GPL X1000/T31 drivers) | runs: 1080p NV12 to JPEG in 10.7 ms, from a file or an ISP frame as a dma-buf |
@@ -33,15 +33,45 @@ them to H.264 and JPEG, and uvcd streams them to Protect (2026-10-28). Read
 
 **Decision (2026-11-10): this kernel is the only one the repo builds for.**
 uvcd's libimp backend, the shims that linked Ingenic's closed library, the
-vendor-kernel image scripts (`image/build.sh`, `image/flash.sh`, the JFFS2
-root with OpenMiko's kernel) and the 3.10 branches of the init scripts are
-gone; uvcd is 523 KB smaller. Everything ran on this kernel for two weeks,
+vendor-kernel image scripts (the JFFS2 root with OpenMiko's kernel) and
+the 3.10 branches of the init scripts are gone; uvcd is 523 KB smaller. Everything ran on this kernel for two weeks,
 and nothing tested the other path any more. The tag `vendor-kernel` is the
 last commit run on OpenMiko's kernel; a `demo.bin` built there (kept as
 `deploy/recovery-vendor-kernel-demo.bin`, ignored, and on the test camera's
 SD card) is still the proven recovery image, because installing this
 kernel's `demo.bin` with the setup button has not been tried yet.
-`flash-modern.sh` still works from a camera running the vendor-kernel image.
+`image/flash.sh` still works from a camera running the vendor-kernel image.
+The scripts lost their `-modern` suffix the same day: `image/build.sh` and
+`image/flash.sh` are this kernel's, and the image is in `build/image/`.
+
+**Decision (2026-11-10): the root filesystem is built from source, all of
+it.** Until then busybox (1.24, 2016), uClibc, wpa_supplicant 2.5 with
+OpenSSL 1.0 and libnl, and the `/etc` skeleton came out of OpenMiko's
+`demo.bin`, 6.5 MB of binaries from 2023 nobody here could rebuild, and
+with them an `/etc/shadow` holding OpenMiko's root password hash, which
+dropbear reads before `/etc/passwd`. Now: busybox 1.37.0 and wpa_supplicant
+2.11 with libnl-tiny, static against musl like dropbear and uvcd
+(`tools/build-busybox.sh`, `tools/build-wpa-supplicant.sh`), 2.5 MB; our
+own `/etc` files and DHCP script in `image/rootfs`; `demo-bin.py` writes
+the bootloader's header itself. The build needs no OpenMiko download, and
+the root image went from 5.06 to 3.96 MB (121 of 274 blocks).
+
+- wpa_supplicant uses its internal crypto: WPA and WPA2 personal. WPA3
+  (SAE) needs an external crypto library and is out; a mixed WPA2/WPA3
+  network connects as WPA2. It logs to the system log (`-s`).
+- busybox is its defconfig, static, less servers, less what needs SysV IPC
+  (`logread`: the log is `/tmp/messages`), plus the flash tools. Its
+  syslogd is built without remote logging: with it, 1.37.0 logs nothing
+  locally (`syslogd_init` sets the flag in `option_mask32` and returns the
+  copy made before).
+- `/etc/passwd` has root locked until the settings bring a password
+  (`deploy.sh passwd`); there is no shadow file. `mdev` is not run: the
+  kernel's devtmpfs makes the nodes. The clock is UTC (musl does not read
+  `/etc/TZ`).
+- Checked before flashing by unpacking the new root into RAM on the camera
+  and switching the running WiFi to the new wpa_supplicant and DHCP script
+  from a chroot, with a fallback: that caught a build without passphrase
+  support.
 
 ## Where this stopped
 
@@ -51,7 +81,7 @@ new kernel and a serial console attached:
 - Runs on the camera: hardware test steps 1, 2, 4, 5, 6 and 7 (boot, flash and
   config, SD card, WiFi and SSH, the watchdog, the camera with `v4l2grab`,
   the microphone; listening in Protect still to do),
-  and `flash-modern.sh` from both kernels. S50camera loads the camera drivers
+  and `flash.sh` from both kernels. S50camera loads the camera drivers
   at boot.
 - Open from bring-up: the 8 GB card that read only zeros; of step 3, only the
   status LEDs (the IR cut filter and IR LEDs were checked from frames on
@@ -306,12 +336,11 @@ started both streams and the microphone's.
 Proposal, implemented in the image scripts:
 
 - **Root**: a read-only squashfs (xz, 128 KiB blocks) on mtdblock2, mounted by the
-  kernel as `/`. It is today's root filesystem (OpenMiko's base slimmed by
-  `build-rootfs.py`, our overlay, our dropbear) without the 3.10 modules, plus our
-  kernel's modules under `/lib/modules/6.18.59` and uvcd with its model under
-  `/rom/uvc`, where `uvcd-run` already looks. There is no `/rom` mount and no
-  block-274 rule; for `demo.bin` the image must still fit the 274 blocks that file
-  format carries (8.6 MiB).
+  kernel as `/`: busybox, dropbear, wpa_supplicant, our `/etc` and init
+  scripts, the kernel's modules under `/lib/modules/6.18.59` and uvcd with
+  its model under `/rom/uvc`, where `uvcd-run` looks
+  (`image/build-rootfs.py`). For `demo.bin` the image must fit the 274
+  blocks that file format carries (8.6 MiB).
 - **Writable storage**: settings stay where they are, the JFFS2 config partition
   (mtdblock3) on `/config`, read by S10config as today, so an existing camera keeps
   its WiFi settings, hostname and keys. `/etc`, `/root` and `/var` (if it is a
@@ -319,9 +348,9 @@ Proposal, implemented in the image scripts:
   because S10config installs `/config/overlay` over them (`/etc/dropbear`,
   `/root/.ssh/authorized_keys`) and S20wifi edits `wpa_supplicant.conf`. The SD card stays optional (`/sdcard/config` imports, a
   development uvcd). Nothing else writes to flash.
-- **Install**: `image/build-modern.sh` builds `uImage`, `root.sqfs` and a
+- **Install**: `image/build.sh` builds `uImage`, `root.sqfs` and a
   `demo.bin` carrying both (`demo-bin.py` takes our uImage as a fourth argument).
-  `image/flash-modern.sh` writes both partitions over ssh: it saves both first,
+  `image/flash.sh` writes both partitions over ssh: it saves both first,
   writes root then kernel with `flashcp`, reads both back, and writes the saved
   copies back if anything does not match. It works from OpenMiko's kernel (root
   in RAM) and from ours (it then runs from busybox copied to `/tmp` and reboots
@@ -657,7 +686,7 @@ are this camera's, where the vendor `board.h` has another board's.
   `CONFIG_TMPFS_XATTR`.
 - No `/config` or `/sdcard` mount points on the read-only root, and an empty
   `lib/modules/3.10.14` made the init scripts take the 3.10 paths
-  (`build-rootfs.py`, `build-modern.sh`, S20wifi, S50camera).
+  (`build-rootfs.py`, `build.sh`, S20wifi, S50camera).
 - No SSH keys: S10config installs `/config/overlay` before S40sshd replaced
   the base image's dangling `/etc/dropbear` link, and `/root` was read-only.
   S10config now replaces the link, and S00rootfs gives `/root` a RAM layer.
@@ -706,7 +735,7 @@ the setup-button procedure tested on this camera. A serial console (UART on ttyS
 without it a kernel that does not reach WiFi is a black box. With it, a test
 kernel boots from RAM through U-Boot ([Bring-up on hardware](#bring-up-on-hardware)).
 
-**Rollback** (automatic, needs the SD card in the camera): `image/flash-modern.sh`
+**Rollback** (automatic, needs the SD card in the camera): `image/flash.sh`
 saves the image the camera runs (kernel partition and the root partition's
 first 274 blocks, as a demo.bin) to `/sdcard/rollback/image.bin` before it
 writes anything. Every boot of the new kernel is then a trial: unless `rollback
@@ -725,8 +754,8 @@ partition and the first 274 blocks of the root partition and the camera boots
 OpenMiko's kernel again. The config partition is not touched by either path,
 but see the JFFS2 risk below.
 
-1. **Serial first boot** (`image/flash-modern.sh` from a running camera, which
-   arms the rollback; `demo.bin` from `image/build-modern.sh` and the setup
+1. **Serial first boot** (`image/flash.sh` from a running camera, which
+   arms the rollback; `demo.bin` from `image/build.sh` and the setup
    button do not). Expected on ttyS1: U-Boot
    `## Booting kernel ... LZMA ... OK`, then earlycon output from the first line
    of the kernel. Check: `Linux version 6.18.59`, `T20` as system type, the CPU line
@@ -791,13 +820,13 @@ differences):
 
 ```sh
 uvc/kernel/build.sh          # third_party/kernel/ (sources), build/kernel/out/
-uvc/image/build-modern.sh    # build/image-modern/{uImage,root.sqfs,demo.bin}
-uvc/image/flash-modern.sh 192.168.1.9
+uvc/image/build.sh           # build/image/{uImage,root.sqfs,demo.bin}
+uvc/image/flash.sh 192.168.1.9
 ```
 
 Host: Linux x86_64 with make, gcc, flex, bison, bc, python3, xz-utils, git, curl,
 kmod (depmod) and squashfs-tools (sqfstar). A clean kernel build takes about 15
 minutes on 4 cores. Only `kernel/build.sh` needs Linux: it can run in an
 `ubuntu:24.04` container with those packages on any x86_64 Docker host, with
-`build/kernel/out/` copied back; `build-modern.sh` runs on macOS too (zig,
-`brew install squashfs`).
+`build/kernel/out/` copied back; `image/build.sh` runs on macOS too (zig,
+`brew install squashfs`), busybox, dropbear and wpa_supplicant included.

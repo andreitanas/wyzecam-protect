@@ -10,13 +10,19 @@ CJSON=1.7.18
 NCNN=20260526
 STB=003501f6d7a8668ce8b6d875e34dd97ad0d5d5b5
 DROPBEAR=2026.94
+BUSYBOX=1.37.0
 VOAAC=0.1.3
 OPUS=1.5.2
+WPA=2.11
+LIBNL_TINY=40493a655d8caa2ccf5206dde1e733abe2920432
+WPA_SHA256=912ea06f74e30a8e36fbb68064d6cdff218d8d591db0fc5d75dee6c81ac7fc0a
+LIBNL_TINY_SHA256=a3f0456006b72352f0ccc9a653eb2428a03bc3ff3c6987a858b0c060ac19b181
 DLMALLOC_SHA256=be7be56b40b4b31417e74e77687f9b96127ea6cae534cf236aee40a4c739508d
 OPUS_SHA256=65c1d2f78b9f2fb20082c38cbe47c951ad5839345876e46941612ee87f9a7ce1
 VOAAC_SHA256=ae38610405f862237f6c70360c406297cc4222abf82e86722c505ba74b53a97d
 # Signed by the Dropbear release key F734 7EF2 EE2E 07A2 6762 8CA9 4493 1494 F29C 6773
 DROPBEAR_SHA256=e098034a843699200c8c977a991fff73159735bf795d5f72ef672c41a6b1ae81
+BUSYBOX_SHA256=3311dff32e746499f4df0d5df04d7eb396382d7e108bb9250e7b519b837043a4
 
 if [ ! -d mbedtls ]; then
     curl -fsSL "https://github.com/Mbed-TLS/mbedtls/releases/download/mbedtls-$MBEDTLS/mbedtls-$MBEDTLS.tar.bz2" | tar xj
@@ -67,6 +73,35 @@ if [ ! -d dropbear ]; then
     tar xjf dropbear.tar.bz2
     rm dropbear.tar.bz2
     mv "dropbear-$DROPBEAR" dropbear
+fi
+
+# The camera's shell, init and tools (GPL-2.0), built by tools/build-busybox.sh
+if [ ! -d busybox ]; then
+    curl -fsSL "https://busybox.net/downloads/busybox-$BUSYBOX.tar.bz2" -o busybox.tar.bz2
+    echo "$BUSYBOX_SHA256  busybox.tar.bz2" | shasum -a 256 -c - >/dev/null
+    tar xjf busybox.tar.bz2
+    rm busybox.tar.bz2
+    mv "busybox-$BUSYBOX" busybox
+fi
+
+# The camera's WiFi supplicant (BSD-3-Clause, built by
+# tools/build-wpa-supplicant.sh)
+if [ ! -d wpa_supplicant ]; then
+    curl -fsSL "https://w1.fi/releases/wpa_supplicant-$WPA.tar.gz" -o wpa_supplicant.tar.gz
+    echo "$WPA_SHA256  wpa_supplicant.tar.gz" | shasum -a 256 -c - >/dev/null
+    tar xzf wpa_supplicant.tar.gz
+    rm wpa_supplicant.tar.gz
+    mv "wpa_supplicant-$WPA" wpa_supplicant
+fi
+
+# OpenWrt's small netlink library (LGPL-2.1), which wpa_supplicant's nl80211
+# driver links statically in place of libnl
+if [ ! -d libnl-tiny ]; then
+    curl -fsSL "https://github.com/openwrt/libnl-tiny/archive/$LIBNL_TINY.tar.gz" -o libnl-tiny.tar.gz
+    echo "$LIBNL_TINY_SHA256  libnl-tiny.tar.gz" | shasum -a 256 -c - >/dev/null
+    tar xzf libnl-tiny.tar.gz
+    rm libnl-tiny.tar.gz
+    mv "libnl-tiny-$LIBNL_TINY" libnl-tiny
 fi
 
 # Yolo-Fastest 1.1 (COCO, ncnn format). Its detection layer's built-in

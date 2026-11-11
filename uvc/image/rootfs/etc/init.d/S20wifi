@@ -16,7 +16,7 @@ start)
 	fi
 	# Files edited on Windows
 	sed -i 's/\r$//' /etc/wpa_supplicant.conf
-	wpa_supplicant -B -Dnl80211 -i wlan0 -c /etc/wpa_supplicant.conf
+	wpa_supplicant -B -s -Dnl80211 -i wlan0 -c /etc/wpa_supplicant.conf
 	udhcpc -i wlan0 -b -S -t 6 -A 10 -x hostname:"$(hostname)"
 	;;
 stop)

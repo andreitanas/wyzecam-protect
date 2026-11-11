@@ -1,10 +1,9 @@
 #!/bin/sh
-# Logging (bounded, in RAM), device nodes, loopback.
+# Logging (bounded, in RAM: /tmp/messages), loopback, the status LEDs.
 case "$1" in
 start)
 	syslogd -s 100 -b 1
 	klogd
-	mdev -s
 	ifconfig lo 127.0.0.1 up
 	# Yellow until uvcd is connected to Protect.
 	echo none > /sys/class/leds/led_blue/trigger

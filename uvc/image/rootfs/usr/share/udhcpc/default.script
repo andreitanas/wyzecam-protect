@@ -1,0 +1,24 @@
+#!/bin/sh
+# udhcpc's events: the address, default route and name servers of a lease.
+RESOLV=/tmp/resolv.conf
+case "$1" in
+deconfig)
+	ifconfig "$interface" 0.0.0.0 up
+	;;
+renew | bound)
+	ifconfig "$interface" "$ip" ${subnet:+netmask "$subnet"} ${broadcast:+broadcast "$broadcast"}
+	if [ -n "$router" ]; then
+		while route del default dev "$interface" 2>/dev/null; do :; done
+		for r in $router; do
+			route add default gw "$r" dev "$interface"
+		done
+	fi
+	{
+		[ -n "$domain" ] && echo "search $domain"
+		for d in $dns; do
+			echo "nameserver $d"
+		done
+	} > $RESOLV.new
+	mv $RESOLV.new $RESOLV
+	;;
+esac

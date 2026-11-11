@@ -1,15 +1,15 @@
 #!/bin/sh
-# Write our kernel and root filesystem (image/build-modern.sh) to a camera's
+# Write our kernel and root filesystem (image/build.sh) to a camera's
 # kernel (mtd1) and root (mtd2) flash partitions over ssh, verify them, and
 # reboot into them.
 #
-#   image/flash-modern.sh [camera-ip] [--no-reboot] [--no-rollback]
+#   image/flash.sh [camera-ip] [--no-reboot] [--no-rollback]
 #
 # Works from OpenMiko's kernel (root in RAM) and from ours (root is the
 # squashfs on mtd2: the camera runs from busybox and uClibc copied to /tmp
 # and reboots right after the write, without unmounting anything).
 #
-# Both partitions are saved to build/image-modern/mtd{1,2}-<ip>-<time>.bin
+# Both partitions are saved to build/image/mtd{1,2}-<ip>-<time>.bin
 # first and written back if anything does not verify. They also go to the
 # camera's SD card as /sdcard/rollback/image.bin (a demo.bin), which makes
 # the new image's boots trials: unless `rollback keep` runs on the camera
@@ -29,8 +29,7 @@ for a; do
     *) CAM=$a ;;
     esac
 done
-DEMO=${DEMO:-../deploy/demo.bin}
-DIR=build/image-modern
+DIR=build/image
 KERNEL=$DIR/uImage
 ROOT=$DIR/root.sqfs
 SSH="ssh -o BatchMode=yes -o ConnectTimeout=8 -o PubkeyAcceptedAlgorithms=+ssh-rsa \
@@ -39,14 +38,13 @@ cam() { $SSH "export PATH=/tmp/fl:/usr/sbin:/sbin:/usr/bin:/bin; $*"; }
 md5() { md5sum "$@" 2>/dev/null || md5 -r "$@"; }
 
 for f in $KERNEL $ROOT; do
-    [ -f $f ] || { echo "no $f; run image/build-modern.sh" >&2; exit 1; }
+    [ -f $f ] || { echo "no $f; run image/build.sh" >&2; exit 1; }
 done
 [ "$(wc -c < $KERNEL)" -le $((0x200000)) ] || { echo "$KERNEL is larger than the kernel partition" >&2; exit 1; }
 [ "$(wc -c < $ROOT)" -le $((0xd30000)) ] || { echo "$ROOT is larger than the root partition" >&2; exit 1; }
 cam "grep -q '\"kernel\"' /proc/mtd && grep -q '\"root\"' /proc/mtd" ||
     { echo "$CAM has no kernel and root MTD partitions" >&2; exit 1; }
 if [ $ROLLBACK = 1 ]; then
-    [ -f "$DEMO" ] || { echo "no $DEMO (for the rollback image's header)" >&2; exit 1; }
     cam "grep -q ' /sdcard ' /proc/mounts" ||
         { echo "$CAM has no SD card mounted for the rollback image (or use --no-rollback)" >&2; exit 1; }
     [ "$(cam "df -k /sdcard | awk 'NR == 2 { print \$4 }'")" -gt 24000 ] ||
@@ -66,7 +64,7 @@ done
 # demo.bin, uploaded before anything is written, armed for our kernel only.
 if [ $ROLLBACK = 1 ]; then
     head -c $((274 * 32768)) $DIR/mtd2-$STAMP.bin > $DIR/root-$STAMP.bin
-    python3 image/demo-bin.py "$DEMO" $DIR/root-$STAMP.bin $DIR/rollback-$STAMP.bin $DIR/mtd1-$STAMP.bin
+    python3 image/demo-bin.py $DIR/mtd1-$STAMP.bin $DIR/root-$STAMP.bin $DIR/rollback-$STAMP.bin
     rm $DIR/root-$STAMP.bin
     SUM=$(md5 < $DIR/rollback-$STAMP.bin | cut -d' ' -f1)
     echo "uploading the rollback image to $CAM:/sdcard/rollback/image.bin"
@@ -78,12 +76,13 @@ if [ $ROLLBACK = 1 ]; then
 fi
 
 # Our kernel runs from mtd2: keep the tools in RAM while it is rewritten,
-# uClibc too (busybox is linked against it).
+# and uClibc with them where busybox still links it (images from before
+# 2026-11-10).
 MODERN=0
 cam "awk '\$2 == \"/\" && \$3 == \"squashfs\" { f = 1 } END { exit !f }' /proc/mounts" && MODERN=1
 cam "mkdir -p /tmp/fl && cp /bin/busybox /tmp/fl/ && for a in sh cat dd md5sum flashcp rm sync; do ln -sf busybox /tmp/fl/\$a; done"
 [ $MODERN = 0 ] ||
-    cam "mkdir -p /tmp/fl/lib && cp -L /lib/ld-uClibc.so.0 /lib/libc.so.1 /tmp/fl/lib/ && mount -o bind /tmp/fl/lib /lib"
+    cam "[ ! -e /lib/ld-uClibc.so.0 ] || { mkdir -p /tmp/fl/lib && cp -L /lib/ld-uClibc.so.0 /lib/libc.so.1 /tmp/fl/lib/ && mount -o bind /tmp/fl/lib /lib; }"
 
 # Stop uvcd (and init's respawn of it; the edit lives in RAM); on
 # OpenMiko's kernel also unmount the old root image from /rom.

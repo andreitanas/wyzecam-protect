@@ -1,199 +1,89 @@
 #!/usr/bin/env python3
-"""Build the camera's root filesystem tar from OpenMiko's.
+"""Build the camera's root filesystem as a tar for sqfstar.
 
-Keeps busybox, wpa_supplicant and the shared libraries they link from the
-base, drops the rest (the 3.10 kernel's modules, the vendor ISP's sensor
-files, ffmpeg, RTSP, micropython, lighttpd, bash, OpenMiko's 2015 dropbear,
-...) and adds the overlays: init scripts from image/rootfs/, our dropbear,
-our kernel's modules, uvcd and its model.
+    build-rootfs.py OUT.tar BUSYBOX BUSYBOX.links OVERLAY_DIR...
 
-The tarball is filtered member by member, never unpacked, so file modes,
-owners and names survive the host filesystem. OUT is a plain tar for
-sqfstar.
-
-    build-rootfs.py BASE.tar.xz OUT.tar OVERLAY_DIR...
+Everything in it is ours: the directories and device nodes below, busybox
+with a link for each of its applets, and the overlay directories' files in
+order (image/rootfs, then what image/build.sh collects: dropbear,
+wpa_supplicant, the kernel's modules, uvcd and its model, the test tools).
+Written as a tar, never unpacked on the host, so owners, modes and device
+nodes do not depend on the host's filesystem.
 """
 import io
 import os
-import posixpath
-import struct
 import sys
 import tarfile
 
-# Programs kept besides busybox (and its applet links).
-KEEP_PROGRAMS = {
-    'bin/busybox',
-    'usr/sbin/wpa_supplicant',
+# Mount points and the directories programs expect. /etc, /root and /var
+# get a writable layer in RAM at boot (S00rootfs).
+DIRS = ('bin sbin usr/bin usr/sbin lib dev dev/pts dev/shm proc sys tmp run root '
+        'config sdcard etc var').split()
+MODES = {'tmp': 0o1777, 'root': 0o700}
+LINKS = {
+    'etc/mtab': '/proc/mounts',
+    'etc/resolv.conf': '../tmp/resolv.conf',  # written by udhcpc's script
+    'var/log': '../tmp',
+    'var/run': '../run',
+    'var/lock': '../tmp',
+    'var/tmp': '../tmp',
 }
-# Whole trees that go.
-DROP_TREES = (
-    'app', 'var/www', 'var/spool', 'usr/libexec', 'usr/share/alsa', 'usr/share/ffmpeg',
-    'usr/share/fonts', 'usr/share/pixmaps', 'usr/share/applications', 'usr/lib/micropython',
-    'usr/lib/lighttpd', 'usr/lib/mjpg-streamer', 'usr/lib/tmpfiles.d', 'etc/ssl', 'etc/lighttpd', 'etc/logrotate.d', 'etc/init.d',
-    'lib/modules', 'driver', 'etc/sensor',
-)
-DROP_FILES = {
-    'etc/openmiko.conf', 'etc/videocapture_settings.json',
-    'etc/videocapture_settings_1_encoder.json', 'etc/v4l2rtspserver.conf.example',
-    'etc/logrotate.conf', 'etc/sudoers', 'usr/share/timezones.tsv', 'etc/ntp.conf',
-}
-BIN_DIRS = ('bin', 'sbin', 'usr/bin', 'usr/sbin')
-LIB_DIRS = ('lib', 'usr/lib')
+# The kernel mounts devtmpfs over /dev before init; these are for the case
+# that it cannot.
+NODES = {'dev/console': (5, 1, 0o600), 'dev/null': (1, 3, 0o666)}
 
 
-def norm(name):
-    return posixpath.normpath(name.lstrip('./')) if name not in ('.', './') else '.'
+def main(out, busybox, links, *overlays):
+    entries = {}  # name -> (TarInfo, data or None), later ones replace
 
+    def add(name, type=tarfile.REGTYPE, mode=0o644, data=None, link=''):
+        t = tarfile.TarInfo('./' + name)
+        t.type, t.mode, t.linkname = type, mode, link
+        t.size = len(data) if data is not None else 0
+        entries[name] = (t, data)
+        return t
 
-def needed(data):
-    """DT_NEEDED entries of a 32-bit little-endian ELF, or None if not ELF."""
-    if data[:4] != b'\x7fELF' or data[4] != 1 or data[5] != 1:
-        return None
-    e_phoff, = struct.unpack_from('<I', data, 28)
-    e_phentsize, e_phnum = struct.unpack_from('<HH', data, 42)
-    loads, dyn = [], None
-    for i in range(e_phnum):
-        p_type, p_offset, p_vaddr, _, p_filesz = struct.unpack_from(
-            '<IIIII', data, e_phoff + i * e_phentsize)
-        if p_type == 1:
-            loads.append((p_vaddr, p_offset, p_filesz))
-        elif p_type == 2:
-            dyn = (p_offset, p_filesz)
-    if not dyn:
-        return []
+    for d in DIRS:
+        add(d, tarfile.DIRTYPE, MODES.get(d, 0o755))
+    for name, target in LINKS.items():
+        add(name, tarfile.SYMTYPE, 0o777, link=target)
+    for name, (major, minor, mode) in NODES.items():
+        t = add(name, tarfile.CHRTYPE, mode)
+        t.devmajor, t.devminor = major, minor
 
-    def off(vaddr):
-        for v, o, n in loads:
-            if v <= vaddr < v + n:
-                return vaddr - v + o
-        raise ValueError('address outside segments')
+    add('bin/busybox', mode=0o755, data=open(busybox, 'rb').read())
+    for path in open(links).read().split():
+        name = path.lstrip('/')
+        add(name, tarfile.SYMTYPE, 0o777, link=os.path.relpath('bin/busybox', os.path.dirname(name)))
 
-    entries, strtab = [], None
-    for i in range(dyn[0], dyn[0] + dyn[1], 8):
-        tag, val = struct.unpack_from('<iI', data, i)
-        if tag == 0:
-            break
-        if tag == 1:
-            entries.append(val)
-        elif tag == 5:
-            strtab = off(val)
-    return [data[strtab + v:data.index(b'\0', strtab + v)].decode() for v in entries]
-
-
-def main(base, out, *overlays):
-    src = tarfile.open(base)
-    members, data = {}, {}
-    for m in src.getmembers():
-        n = norm(m.name)
-        members[n] = m
-        if m.isreg():
-            data[n] = src.extractfile(m).read()
-
-    def resolve(n, depth=0):
-        """Follow symlinks inside the image; None if dangling."""
-        m = members.get(n)
-        if m is None or depth > 16:
-            return None
-        if not m.issym():
-            return n
-        t = m.linkname
-        t = norm(t) if t.startswith('/') else posixpath.normpath(
-            posixpath.join(posixpath.dirname(n), t))
-        return resolve(t, depth + 1)
-
-    def dropped(n):
-        if n in DROP_FILES or any(n == t or n.startswith(t + '/') for t in DROP_TREES):
-            return True
-        m = members[n]
-        if m.isreg() and posixpath.dirname(n) in BIN_DIRS:
-            return n not in KEEP_PROGRAMS
-        return False
-
-    keep = {n for n in members if not dropped(n)}
-
-    # Shared libraries in /usr/lib: the closure of what kept programs link.
-    # /lib (uClibc, ~1 MB) stays whole: the dynamic loader is reached through
-    # PT_INTERP, not DT_NEEDED.
-    by_soname = {}
-    for n in members:
-        if posixpath.dirname(n) in LIB_DIRS and '.so' in posixpath.basename(n):
-            by_soname.setdefault(posixpath.basename(n), n)
-    libs, todo = set(), [n for n in KEEP_PROGRAMS]
-    while todo:
-        n = resolve(todo.pop())
-        if n is None or n in libs:
-            continue
-        libs.add(n)
-        for so in needed(data.get(n, b'')) or []:
-            if so not in by_soname:
-                sys.exit(f'{n} needs {so}, which is not in the image')
-            todo.append(by_soname[so])
-    for n in list(keep):
-        m = members[n]
-        if posixpath.dirname(n) == 'usr/lib' and '.so' in posixpath.basename(n):
-            if (resolve(n) or n) not in libs:
-                keep.discard(n)
-
-    # Ours replace theirs.
-    ours = {}
     for top in overlays:
         for root, dirs, files in os.walk(top):
-            # Empty directories too: mount points on a read-only root
-            for f in files + [d for d in dirs if os.path.islink(os.path.join(root, d)) or
-                              not os.listdir(os.path.join(root, d))]:
+            for f in sorted(dirs + files):
                 path = os.path.join(root, f)
-                ours[os.path.relpath(path, top)] = path
-    keep -= set(ours)
+                name = os.path.relpath(path, top)
+                if os.path.islink(path):
+                    add(name, tarfile.SYMTYPE, 0o777, link=os.readlink(path))
+                elif os.path.isdir(path):
+                    add(name, tarfile.DIRTYPE, 0o755)
+                else:
+                    mode = 0o755 if os.access(path, os.X_OK) else 0o644
+                    add(name, mode=mode, data=open(path, 'rb').read())
 
-    # Links whose target went (busybox applets stay: busybox is kept). Links
-    # dangling in the base image point at runtime paths
-    # (/etc/resolv.conf -> ../tmp/resolv.conf) and stay.
-    def alive(n):
-        if not members[n].issym():
-            return True
-        t = resolve(n)
-        return t is None or t in keep
-
-    keep = {n for n in keep if alive(n)}
-
-    buf = io.BytesIO()
-    with tarfile.open(fileobj=buf, mode='w', format=tarfile.GNU_FORMAT) as dst:
-        for m in src.getmembers():
-            n = norm(m.name)
-            if n in keep:
-                dst.addfile(m, io.BytesIO(data[n]) if m.isreg() else None)
-        for n, path in sorted(ours.items()):
-            dirs = posixpath.dirname(n).split('/')
-            for i in range(1, len(dirs) + 1):
-                d = '/'.join(dirs[:i])
-                if d and d not in keep:
-                    t = tarfile.TarInfo('./' + d)
-                    t.type, t.mode = tarfile.DIRTYPE, 0o755
-                    dst.addfile(t)
-                    keep.add(d)
-            t = tarfile.TarInfo('./' + n)
-            if os.path.islink(path):
-                t.type, t.linkname, t.mode = tarfile.SYMTYPE, os.readlink(path), 0o777
-                dst.addfile(t)
-                continue
-            if os.path.isdir(path):
-                t.type, t.mode = tarfile.DIRTYPE, 0o755
-                dst.addfile(t)
-                keep.add(n)
-                continue
-            st = os.stat(path)
-            t.size, t.mode, t.mtime = st.st_size, st.st_mode & 0o777, int(st.st_mtime)
-            with open(path, 'rb') as fp:
-                dst.addfile(t, fp)
-    raw = buf.getvalue()
-    total = sum(members[n].size for n in keep if n in members and members[n].isreg())
-    with open(out, 'wb') as fp:
-        fp.write(raw)
-    print(f'{out}: {len(keep)} entries, {total / 1048576:.1f} MiB of base files, '
-          f'tar {len(raw) / 1048576:.1f} MiB')
+    # Parents before children, so every directory exists with our mode
+    for name in list(entries):
+        d = os.path.dirname(name)
+        while d and d not in entries:
+            add(d, tarfile.DIRTYPE, 0o755)
+            d = os.path.dirname(d)
+    with tarfile.open(out, 'w', format=tarfile.GNU_FORMAT) as dst:
+        for name in sorted(entries):
+            t, data = entries[name]
+            dst.addfile(t, io.BytesIO(data) if data is not None else None)
+    size = sum(t.size for t, _ in entries.values())
+    print(f'{out}: {len(entries)} entries, {size / 1048576:.1f} MiB')
 
 
 if __name__ == '__main__':
-    if len(sys.argv) < 4:
+    if len(sys.argv) < 5:
         sys.exit(__doc__)
     main(*sys.argv[1:])

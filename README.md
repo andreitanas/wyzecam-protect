@@ -11,8 +11,9 @@ vehicle, animal), with no RTSP, ONVIF or bridge box.
   sensor, the ISP, the H.264 and JPEG encoders and the microphone. uvcd
   uses them through V4L2 and ALSA: no vendor kernel and no closed library.
 - **The image** is a kernel and a read-only squashfs root (busybox, dropbear,
-  wpa_supplicant, the modules, uvcd) in the camera's flash. Settings live in
-  the config flash partition, so the SD card is optional.
+  wpa_supplicant, the modules, uvcd) in the camera's flash, all built from
+  source here. Settings live in the config flash partition, so the SD card
+  is optional.
 
 This is not a product of, or endorsed by, Wyze or Ubiquiti.
 
@@ -40,12 +41,10 @@ Docker (`docs/kernel-modern.md`, Building).
 cd uvc
 ./fetch-deps.sh             # third-party sources, once
 kernel/build.sh             # Linux: build/kernel/out/ (uImage, modules)
-image/build-modern.sh       # build/image-modern/{uImage,root.sqfs,demo.bin}
+image/build.sh              # build/image/{uImage,root.sqfs,demo.bin}
 ```
 
-- The base root filesystem comes from an
-  [OpenMiko](https://github.com/openmiko/openmiko/releases) `demo.bin`,
-  expected at `deploy/demo.bin`.
+- WiFi is WPA or WPA2 personal; WPA3-only networks are not supported.
 - `./deploy.sh utils` and `./deploy.sh passwd` generate the camera's
   settings (WiFi, hostname, root password, SSH key) under
   `deploy/config/overlay`.
@@ -64,7 +63,7 @@ image/build-modern.sh       # build/image-modern/{uImage,root.sqfs,demo.bin}
      flashes `demo.bin`.
   3. Take `demo.bin` off the card once the camera is up.
 - **Camera already running this firmware, over SSH. Tested:**
-  `uvc/image/flash-modern.sh [camera-ip]` saves the running image to the SD
+  `uvc/image/flash.sh [camera-ip]` saves the running image to the SD
   card, writes and verifies the kernel and root partitions, and reboots.
   - The first boots are trials. Check the camera, then run `rollback keep`
     on it within 10 minutes; otherwise it puts the saved image back.
@@ -95,7 +94,7 @@ resets it to ready to adopt.
 uvcd first ran on OpenMiko's 3.10 kernel through Ingenic's closed libimp.
 That backend and its image scripts are gone from `main`; the tag
 `vendor-kernel` is the last commit with them, and builds that image with
-`uvc/image/build.sh`.
+`uvc/image/build.sh` there.
 
 ## Layout and documents
 

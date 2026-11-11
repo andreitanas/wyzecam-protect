@@ -1,6 +1,6 @@
 #!/bin/sh
-# Trial boots after image/flash-modern.sh, for a camera without a serial
-# console. flash-modern.sh saves the image the camera ran before (its kernel
+# Trial boots after image/flash.sh, for a camera without a serial
+# console. flash.sh saves the image the camera ran before (its kernel
 # partition and the root partition's first 274 blocks, as a demo.bin) to the
 # SD card, with the uImage header of the kernel it flashed. While that kernel
 # runs and the saved image is on the card, every boot is a trial: unless
@@ -48,7 +48,7 @@ snapshot() {
 		echo; cat /proc/mounts
 		echo; lsmod
 		echo; ps
-		echo; logread 2>/dev/null | tail -200
+		echo; tail -200 /tmp/messages
 		echo; dmesg
 	} > $DIR/trial.tmp 2>&1
 	mv $DIR/trial.tmp $DIR/trial.txt
@@ -56,15 +56,15 @@ snapshot() {
 }
 
 # Check the saved image, stop uvcd, and go on from RAM: the rest runs from
-# busybox and uClibc copied to /tmp, with /lib bound over, since the root
-# partition about to be rewritten may be the one we run from.
+# busybox copied to /tmp, since the root partition about to be rewritten is
+# the one we run from.
 restore() {
 	if [ "$(md5sum < $DIR/image.bin | cut -d' ' -f1)" != "$(cat $DIR/image.md5)" ]; then
 		log "$DIR/image.bin does not match image.md5: not rolling back"
 		exit 1
 	fi
 	rm -rf $FL
-	mkdir -p $FL/lib
+	mkdir -p $FL
 	tail -c +65 $DIR/image.bin | head -c $KERNEL > $FL/kernel
 	tail -c +$((65 + KERNEL)) $DIR/image.bin > $FL/root
 	if [ "$(wc -c < $FL/kernel)" != $KERNEL ] || [ "$(wc -c < $FL/root)" != $ROOT ]; then
@@ -76,16 +76,12 @@ restore() {
 	kill -HUP 1
 	killall uvcd-run uvcd 2>/dev/null
 	sleep 3
-	awk '$2 == "/" && $3 == "squashfs" { f = 1 } END { exit !f }' /proc/mounts ||
-		umount /rom 2>/dev/null
 
 	cp /bin/busybox $FL/
 	for a in sh cat cut date dd head killall logger md5sum flashcp mv reboot rm sleep sync tail umount watchdog wc; do
 		ln -sf busybox $FL/$a
 	done
-	cp -L /lib/ld-uClibc.so.0 /lib/libc.so.1 $FL/lib/
 	cp "$0" $FL/rollback
-	mount -o bind $FL/lib /lib
 	PATH=$FL exec $FL/sh $FL/rollback write
 }
 

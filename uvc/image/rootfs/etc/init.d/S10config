@@ -28,11 +28,6 @@ start)
 		fi
 	fi
 
-	# /etc/dropbear links to a missing /var/run/dropbear in the base image
-	if [ -L /etc/dropbear ] && [ ! -e /etc/dropbear ]; then
-		rm -f /etc/dropbear
-		mkdir -p /etc/dropbear
-	fi
 	if [ -d /config/overlay ]; then
 		find /config/overlay -type f | while read -r f; do
 			install -D "$f" "${f#/config/overlay}"
