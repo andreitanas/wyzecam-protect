@@ -97,12 +97,12 @@ console attached:
   in the 7 minutes after, with a movie in view and 79 snapshot uploads,
   every minute 1500 or 1501 frames on each stream and no warnings, but the
   picture broke ([Temporal noise reduction](#temporal-noise-reduction)).
-  Flashed a third time with it off.
+  Flashed a third time with it off, and a fourth time at 23:47 UTC (kernel
+  build #31) with the cause fixed in the sensor and ISP drivers and it on.
 - Protect's mobile apps (2026-11-10): they played clicks for audio and
   waited seconds after a switch to the camera; uvcd's stream now follows a
   UniFi camera's (64-bit clock ticks, an Opus track, answers to latency
-  probes), in [`protect-streaming.md`](protect-streaming.md). Temporal noise reduction is still off in uvcd
-  ([below](#temporal-noise-reduction)).
+  probes), in [`protect-streaming.md`](protect-streaming.md).
 - The object detector is back on on the test camera (2026-11-10) and takes
   0.7 s a pass instead of 1.4 s, with convolution layers of uvcd's own
   ([Object detector](#object-detector)); Protect's app shows its
@@ -480,32 +480,62 @@ snapshot uploads an event), not at all in three hours of an empty scene.
 - zig's libc exports its allocator weakly, so the definitions in
   `camera_malloc.c` replace it for libc's own callers too. Check after a zig
   upgrade: `nm` of an unstripped link must show no `SmpAllocator`.
-- Temporal noise reduction was tried again with this malloc and stays off
-  ([below](#temporal-noise-reduction)): its fault is another one.
+- Temporal noise reduction was tried again with this malloc and broke the
+  picture: another fault, found the same day
+  ([below](#temporal-noise-reduction)).
 
 ### Temporal noise reduction
 
-**Decision (2026-11-10): Temper stays off in uvcd** (`apply_isp` sets the
-control to 0), as since 2026-10-28. With uvcd's own malloc it ran for 5.5
-minutes with no warning in uvcd's log and was flashed on at 19:39 UTC.
-Within 15 minutes Protect showed a broken picture (user): the whole frame
-shifted about 650 pixels to the right and wrapped, green left of the seam and
-magenta right of it (the Bayer phase is off), on all streams, with frame
-counts and timestamps in the log still perfect. Setting the control to 0 on
-the running ISP did not repair it; restarting uvcd did. This is what "broke
-the 1080p frames" meant in October; uvcd cannot see it.
+**Decision (2026-11-10): Temper is on again and follows Protect's noise
+reduction setting** (`apply_isp`; at 50 the driver's default threshold, 64).
+It was off from 2026-10-28 for "breaking the 1080p frames": the whole picture
+shifted sideways by a third (650 or 760 pixels) and wrapped, with wrong
+colours on both sides of the seam, on all streams, while frame counts and
+timestamps stayed perfect. Temper did not cause that. It made it happen on
+every boot:
 
-- Not found: what throws the ISP's input out of step. Temper adds 8.3 MB a
-  frame of reads and as much of writes to the memory bus, next to the
-  detector and two encoders; the vendor's ISP runs it on this hardware, with
-  a 4.1 MB buffer. To try: the RAW16 buffer under the same load, and what
-  the ISP's input port status says when it happens.
-- A single `v4l2grab` on `/dev/video0` while uvcd streamed (what
-  `nightlog.sh` does every minute) did not do it.
+- The kernel has no `CONFIG_PM`, so the sensor is powered once, at its
+  probe, and stays powered. Out of reset the JX-F22 sends frames in its
+  default mode, and it did so from boot until the first stream start.
+- `t20-isp` started the VIC first and the sensor last. With the default
+  mode's frames arriving in between, the VIC reports errors (interrupt bit
+  19, 60000 a second) and is out of step with the sensor when the real
+  frames come: every line begins with the end of another.
+- That time was a few milliseconds, too short to meet a frame, except on
+  the first start with Temper on: its 8.3 MB buffer is allocated there.
+  Five boots of five came up shifted, from the first frame, and every later
+  start was right, because the sensor sleeps after its first stop. A 500 ms
+  sleep in that place did the same with Temper off.
+
+Three changes, each of which alone prevents it (tested without reboots:
+reloading the sensor module leaves the sensor as after boot):
+
+- `jxf2x` puts the sensor to sleep right after its reset (patch 0011).
+- `t20-isp` starts the VIC last, after the core's input and just before
+  the sensor (patch 0012).
+- `t20-isp` resets the VIC on its error interrupts, as the vendor's driver
+  does, and logs `input error` (patch 0012). With the old sensor module
+  and the 500 ms sleep, the picture was right after 30 of them.
+
+How to look at it again:
+
+- `isptool input` on the camera (in the image, `uvc/capture/isptool.c`)
+  prints what the ISP core measures of its input for a second and says
+  whether the VIC is in step. In step: 1042-1043 ISP clocks of blanking
+  between lines, 801043 between frames. Out of step, the 270 blank lines
+  come split, 13 between frames and 257 after one line inside the frame.
+  uvcd's log and frame counts show nothing.
+- Out of step, `isptool w 0x13300000 0x11` (the VIC's reset bit) puts the
+  picture right while streaming. Setting Temper to 0 does not.
 - `uvc/tools/streamsnap.sh out.jpg` takes a picture of what the camera is
-  sending right now, from a capture on the NVR: the way to see such a fault,
-  since snapshots and frame statistics show nothing.
-- Pictures of it: `uvc/build/av-debug/2026-11-10-tnr-broken/` (ignored).
+  sending right now, from a capture on the NVR.
+- Flashed 2026-11-10 23:47 UTC: in step after four boots of four with
+  Temper on, no input errors, the picture right in snapshots of the stream,
+  and in step every minute of 12 with a movie in view.
+- The registers are in [`t20-isp-hardware.md`](t20-isp-hardware.md);
+  pictures, register dumps and logs in
+  `uvc/build/av-debug/2026-11-10-tnr-broken/` and
+  `2026-11-10-tnr-investigation/` (ignored).
 
 ### WDR
 

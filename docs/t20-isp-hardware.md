@@ -48,11 +48,27 @@ low active.
 | 0x10 | DB_CFG (DVP) | bits 19:17 data type (1 = RAW10), bit 20 high alignment, bit 0 VSYNC polarity low, bit 1 HSYNC polarity low |
 | 0x14 | IDI_TYPE | MIPI data type |
 | 0x50 | GLOBAL_CFG | ISP preset mode in bits 6:5 (0 = mode 1) |
-| 0x90-0x9c | state, pixel and line counters, output FIFO count | read only; while streaming 1080p: 0x90 = 3, 0x94 = 0x059e01e2, 0x98 = 0x00e20356, 0x9c = 0x4f0 (one sample, not decoded) |
+| 0x90 | STATE | read only; 2 and 3 inside a frame, 5 between frames, 0 with no input |
+| 0x94 | PIXEL | read only; two 16-bit counts that add up to the width |
+| 0x98 | LINE | read only; two 16-bit counts that add up to the height |
+| 0x9c | OFIFO_COUNT | read only; pixels in the output FIFO: 0 between frames, about 1100 to 1920 inside one |
 
 Start for a DVP RAW10 sensor: INTF_TYPE = 3, DB_CFG = RAW10 (polarity bits
 only when the sensor's are low), RESOLUTION, GLOBAL_CFG = 0, CONTROL = 2
 (register enable), then CONTROL = 1 (start). Stop: CONTROL = 8 (safe reset).
+
+The VIC takes whatever the sensor sends once it is started, and it must be in
+step with the sensor from the first frame (verified 2026-11-10). Frames of
+another size (the JX-F22's default mode, which it sends from its reset until
+it is set up) make it raise its error interrupt about 60000 times a second,
+and it stays out of step when the right frames follow: the ISP's picture is
+shifted sideways by 650 or 760 pixels and wrapped, the Bayer phase wrong on
+both sides of the seam, and of the sensor's 270 blank lines the ISP core sees
+13 between frames and 257 after one line inside the frame. CONTROL = 0x11
+(start with bit 4, VIC reset) while streaming puts it in step from the next
+frame; CONTROL reads 1 again afterwards. The vendor's driver writes that
+reset on every error interrupt, and on the first, tenth and twentieth frame
+after a start.
 
 ## ISP interrupt controller
 
@@ -63,8 +79,10 @@ only when the sensor's are low), RESOLUTION, GLOBAL_CFG = 0, CONTROL = 2
 | 0x14 | enable (bits set = enabled) |
 | 0x1c | mask (bits set = masked) |
 
-Bits 15:0 are the ISP core's interrupt lines 0-15, bits 22:16 the VIC's.
-Pending = status & ~mask.
+Bits 15:0 are the ISP core's interrupt lines 0-15, bits 22:16 the VIC's:
+bit 16 a frame done, bits 19 and 20 errors (bit 19 seen, for frames of the
+wrong size). Pending = status & ~mask. A source shows in status only while it
+is enabled.
 
 ## ISP core
 
@@ -95,6 +113,14 @@ driver uses:
   scaled to 219/255 with no Y offset), 0x6a4-0x6ac
   offsets, 0x6b0 bit 0 matrix, 1 filter, 2 horizontal and 3 vertical chroma
   downsampling (all needed for 4:2:0).
+- **Frame statistics**, what the core measures of its input: 0x970 bit 0
+  reset (write 1, then 0), 0x974 hold; then four registers each (minimum,
+  maximum, sum, count) for the active width at 0x980, the active height at
+  0x990, the blanking between lines at 0x9a0 and between frames at 0x9b0,
+  the blanking in ISP clocks. The sums stop at 2^31, after 41 s of 1080p,
+  and the minimum and maximum with them. JX-F22 at 1080p25 with the VIC in
+  step: 1920, 1080, 1042-1043 and 801043 (270 lines of 2962 clocks; the ISP
+  clock is 100 MHz).
 - **Video DMA writers**: DS1 Y at 0xc00, DS1 UV at 0xc80 (FR 0xb00/0xb80,
   DS2 0xd00/0xd80, same layout):
   +0x00 bits 3:0 base mode (13 = NV12), 7:6 plane (0 Y, 1 UV, 2 VU), bit 9
@@ -226,6 +252,13 @@ back 0; with nothing written it works anyway.
 - At strength 64 and a fixed exposure the dark desk's chroma did not move
   (no tint); 0x3d0 at 64, 128 and 256 made the picture brighter, not less
   affected, so its meaning differs from the header's description.
+
+## Sensor (JX-F22) out of reset
+
+After its reset the sensor sends frames in a default mode, on all pins,
+until register 0x12 bit 6 (sleep) is set (verified 2026-11-10: PCLK, HSYNC
+and VSYNC toggle on port A from the driver's probe on, and a started VIC
+counts frames). The driver sets the bit right after the reset.
 
 ## Sensor (JX-F22) mirror and flip
 

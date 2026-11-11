@@ -135,8 +135,9 @@ the probe's time, encDelay the camera's delay from capture to sending.
 ## Open
 
 - uvcd with all of this and kernel patch 0016 are in the image flashed on
-  the test camera on 2026-11-10 (17:29 UTC, again at 19:39 and after) (before that uvcd ran from
-  `/sdcard/uvc/uvcd`, and the patch had been loaded once by hand).
+  the test camera on 2026-11-10 (17:29 UTC and three times after; before
+  that uvcd ran from `/sdcard/uvc/uvcd`, and the patch had been loaded once
+  by hand).
 - A longer run on the iPhone: its audio died once in several tries before the
   Opus track, and has not been watched for long since.
 - Only `andd` probes were seen being answered on the wire; no `iosd` probe
@@ -148,4 +149,3 @@ the probe's time, encDelay the camera's delay from capture to sending.
   the camera's frames days in the past. The detector is on again since
   2026-11-10 and sends its events (`kernel-modern.md`, Object detector), and
   the app shows its detections (user, 2026-11-10).
-- Temporal noise reduction is still off in uvcd (`kernel-modern.md`).
