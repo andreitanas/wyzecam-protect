@@ -271,7 +271,17 @@ void smart_update(struct smart *s, const struct detection *dets, int n, int64_t 
         t->score = score;
         t->hits++;
         t->last_mono = mono;
-        t->zones = object_zones(s, d->cls, box, score);
+        // A sighting below the zone's threshold or just outside it does not
+        // take a reported object out at once (that ended the event and
+        // started another on the next pass): it stays for as long as a
+        // missed one would.
+        int zones = object_zones(s, d->cls, box, score);
+        if (zones) {
+            t->zones = zones;
+            t->zone_mono = mono;
+        } else if (mono - t->zone_mono > LOST_MS) {
+            t->zones = 0;
+        }
         if (t->hits >= CONFIRM_HITS || score >= CONFIRM_SCORE)
             t->confirmed = 1;
         if (t->zones && score > t->best_score && r->nsnap < SMART_TRACKS) {

@@ -1,5 +1,10 @@
 # Kernel and Ingenic SDK: options (2026-10-25)
 
+> History. This describes the image as it was on 2026-10-25, on OpenMiko's
+> kernel and root filesystem with Ingenic's closed libimp (the tag
+> `vendor-kernel`). None of that is in `main` any more:
+> [`kernel-modern.md`](kernel-modern.md) describes what replaced it.
+
 Notes from a discussion, nothing decided or changed. The image currently keeps
 OpenMiko's kernel and Ingenic's closed camera stack; this is what replacing them
 would involve.

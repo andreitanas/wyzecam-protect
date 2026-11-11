@@ -96,6 +96,29 @@ int main(void) {
         cJSON_Delete(leave);
     }
 
+    // A reported person whose score dips below the zone's threshold for a
+    // pass stays in the event.
+    const float dip[5] = {0.50f, 0.50f, 0.40f, 0.50f, 0.50f};
+    int left = 0, entered = 0;
+    for (int i = 0; i < 5; i++) {
+        mono += 800, wall += 800;
+        struct detection p = {DETECT_PERSON, dip[i], 0.5f, 0.3f, 0.06f, 0.3f};
+        smart_update(&s, &p, 1, mono, wall, 640, 360, &r);
+        entered += !strcmp(edge(&r), "enter");
+        left += !strcmp(edge(&r), "leave");
+        cJSON_Delete(r.payload);
+    }
+    expect("score dips below the zone threshold once: one event", entered == 1 && left == 0);
+    // Below it for longer than a lost object's time: leave.
+    for (int i = 0; i < 8 && !left; i++) {
+        mono += 800, wall += 800;
+        struct detection p = {DETECT_PERSON, 0.40f, 0.5f, 0.3f, 0.06f, 0.3f};
+        smart_update(&s, &p, 1, mono, wall, 640, 360, &r);
+        left += !strcmp(edge(&r), "leave");
+        cJSON_Delete(r.payload);
+    }
+    expect("  below it for 5 s: leave", left == 1);
+
     // Zone allowing only people: a car in it is not reported.
     struct smart_settings set = {.enabled = {1, 1, 1}, .nzones = 1};
     set.zones[0] = (struct motion_zone){.id = 3, .npts = 4, .level = 50};

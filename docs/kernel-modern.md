@@ -478,6 +478,20 @@ timestamp step 41 ms).
 - `uvc/bench/prof.sh` prints a model's per-layer times on the camera (the
   fastest of 8 runs, since uvcd keeps running).
 
+### Detection events
+
+**Decision (2026-11-10): a reported object stays in its event through a weak
+sighting** (`uvc/src/smart.c`). An object counts in a zone when its score is
+above the zone's threshold (45 at the default sensitivity) and its centre is
+inside. That was decided anew on every sighting, so one pass with a score
+just under the threshold took the object out, ended the event at once and
+the next pass began another. Protect's database had 779 events from this
+camera in six hours with a film in view, 460 of them beginning within 5 s
+of the one before. Now such a sighting leaves the object in for as long as
+a missed one would (4.5 s). Counted on the camera for six minutes each, with
+the film: 18 events of which 7 began within 2 s of the last one's end
+before, 11 and none after. `test/test_smart.c` has the case.
+
 ### Memory allocator
 
 uvcd on the camera uses Doug Lea's malloc (`uvc/src/camera_malloc.c`,

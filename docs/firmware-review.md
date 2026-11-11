@@ -1,5 +1,10 @@
 # OpenMiko and uvcd integration review (2026-10-25)
 
+> History. This describes the image as it was on 2026-10-25, on OpenMiko's
+> kernel and root filesystem with Ingenic's closed libimp (the tag
+> `vendor-kernel`). None of that is in `main` any more:
+> [`kernel-modern.md`](kernel-modern.md) describes what replaced it.
+
 This review was done read-only on the camera (192.168.1.9, OpenMiko on Buildroot 2016.02,
 kernel 3.10.14, 92 MB RAM visible to Linux) and against the OpenMiko sources (commit
 00f72a6). Nothing was changed while reviewing.

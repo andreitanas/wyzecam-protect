@@ -142,8 +142,11 @@ the probe's time, encDelay the camera's delay from capture to sending.
   Opus track, and has not been watched for long since.
 - Only `andd` probes were seen being answered on the wire; no `iosd` probe
   arrived in the 12 s looked at.
-- Not followed up: in a capture on the NVR, one TCP flow between the camera
-  (port 2058) and 64.6.119.138 port 7550, 159 KB toward the camera.
+- The TCP flow between the camera (port 2058) and 64.6.119.138 seen in a
+  capture on the NVR was not a connection (2026-11-10): one VLAN-tagged
+  copy of a stream packet on the switch's own interface (`tcpdump -i any`),
+  read four bytes off. The camera's connections are its three streams and
+  the control channel to the NVR, and SSH.
 - Protect showed "Last Motion: 11 Days Ago" for this camera on 2026-11-09:
   the detector was off (`DETECT_MODEL=`), and until that day Protect dated
   the camera's frames days in the past. The detector is on again since

@@ -32,6 +32,7 @@ struct smart_track {
     int confirmed;
     int zones;        // bit i: in settings zone i
     int64_t first_wall, last_mono;
+    int64_t zone_mono; // last sighting that counted in a zone
     // Best sighting, for the leave frame's per-object snapshot.
     int best_score;
     int best_box[4], framing[4];

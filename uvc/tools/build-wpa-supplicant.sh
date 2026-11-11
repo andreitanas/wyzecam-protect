@@ -38,7 +38,7 @@ CONFIG_BACKEND=file
 CONFIG_CTRL_IFACE=y
 # -s: messages to the system log (S20wifi)
 CONFIG_DEBUG_SYSLOG=y
-# utils/wpa-gen.sh writes a bgscan line
+# Settings written for OpenMiko (its wpa-gen.sh) have a bgscan line
 CONFIG_BGSCAN_SIMPLE=y
 # and "group=CCMP TKIP WEP104 WEP40", which 2.11 refuses to parse without WEP
 CONFIG_WEP=y

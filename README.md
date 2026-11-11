@@ -45,9 +45,8 @@ image/build.sh              # build/image/{uImage,root.sqfs,demo.bin}
 ```
 
 - WiFi is WPA or WPA2 personal; WPA3-only networks are not supported.
-- `./deploy.sh utils` and `./deploy.sh passwd` generate the camera's
-  settings (WiFi, hostname, root password, SSH key) under
-  `deploy/config/overlay`.
+- `./deploy.sh wifi` and `./deploy.sh passwd` write the camera's settings
+  (WiFi network, root password, your SSH key) under `deploy/config/overlay`.
 - `make -C uvc test` runs uvcd's tests on the host.
 
 ## Install
@@ -106,5 +105,5 @@ That backend and its image scripts are gone from `main`; the tag
 - `docs/t20-isp-hardware.md`: the T20's camera input, ISP, encoders and
   audio as verified on hardware.
 - `docs/protect-streaming.md`: the stream Protect expects from a camera.
-- `docs/firmware-review.md`, `docs/kernel-and-sdk.md`: the review of
-  OpenMiko and of the vendor kernel and SDK that led here.
+- `docs/firmware-review.md`, `docs/kernel-and-sdk.md`: history, the review
+  of OpenMiko and of the vendor kernel and SDK that led here.
