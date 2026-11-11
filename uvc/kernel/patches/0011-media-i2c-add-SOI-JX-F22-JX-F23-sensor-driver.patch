@@ -44,7 +44,7 @@ new file mode 100644
 index 000000000..2884ebe77
 --- /dev/null
 +++ b/drivers/media/i2c/jxf2x.c
-@@ -0,0 +1,644 @@
+@@ -0,0 +1,652 @@
 +// SPDX-License-Identifier: GPL-2.0+
 +/*
 + * SOI JX-F22 and JX-F23 image sensors (1920x1080, 10-bit Bayer, parallel
@@ -387,7 +387,15 @@ index 000000000..2884ebe77
 +	usleep_range(15000, 16000);
 +	gpiod_set_value_cansleep(s->reset, 0);
 +	usleep_range(5000, 6000);
-+	return 0;
++	/*
++	 * Out of reset the sensor sends frames in its default mode. Asleep
++	 * until streaming starts: without runtime PM it stays powered from
++	 * the probe on, and a receiver started into those frames loses step.
++	 */
++	ret = cci_write(s->regmap, JXF2X_REG_SYS, JXF2X_SYS_SLEEP, NULL);
++	if (ret)
++		clk_disable_unprepare(s->xclk);
++	return ret;
 +}
 +
 +static int jxf2x_power_off(struct device *dev)

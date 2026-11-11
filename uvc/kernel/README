@@ -17,11 +17,13 @@ patches/      applied in order to Linux v6.18.59:
   0009        SFC: T20 compatible (X1000 registers). Ours; runs.
   0010        spi-nor: erase in 32 KiB blocks. Ours; runs.
   0011        JX-F22/JX-F23 sensor, V4L2 subdevice. Ours (register tables
-              from Ingenic's GPL-2.0+ sensor drivers); runs (JX-F22).
+              from Ingenic's GPL-2.0+ sensor drivers); runs (JX-F22). Asleep
+              from its reset until streaming starts.
   0012        T20 camera input and ISP, V4L2 (NV12 out, white balance,
               colour, two outputs, spatial and temporal noise reduction,
               sharpening), and the DVP pin group. Ours, from
-              docs/t20-isp-hardware.md; runs.
+              docs/t20-isp-hardware.md; runs. The input (VIC) starts last
+              and is reset on its error interrupts.
   0013        T20 VPU JPEG and H.264 encoders, V4L2 mem2mem. Ours (VPU
               sequences and register names from Ingenic's GPL-2.0 drivers,
               the T20 H.264 values in docs/t20-isp-hardware.md); runs.

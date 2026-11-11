@@ -67,7 +67,7 @@ new file mode 100644
 index 000000000..076de7775
 --- /dev/null
 +++ b/drivers/media/platform/ingenic/t20-isp.c
-@@ -0,0 +1,1721 @@
+@@ -0,0 +1,1742 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
 + * Ingenic T20 camera input (VIC) and ISP core: a parallel Bayer sensor in,
@@ -106,6 +106,7 @@ index 000000000..076de7775
 +#define VIC_CONTROL_START	BIT(0)
 +#define VIC_CONTROL_REG_ENABLE	BIT(1)
 +#define VIC_CONTROL_SAFE_RESET	BIT(3)
++#define VIC_CONTROL_RESET	BIT(4)
 +#define VIC_RESOLUTION		0x04
 +#define VIC_INTF_TYPE		0x0c
 +#define VIC_INTF_DVP		3
@@ -120,6 +121,7 @@ index 000000000..076de7775
 +#define IRQC_STATUS		0x0c
 +#define IRQC_ENABLE		0x14
 +#define IRQC_MASK		0x1c
++#define IRQC_VIC_ERRORS		GENMASK(20, 19)
 +
 +/* ISP core */
 +#define ISP_ACTIVE_WIDTH	0x010
@@ -787,24 +789,34 @@ index 000000000..076de7775
 +	isp_write(isp, base + SCALER_VCOEFSET, t20_isp_scaler_coefset(h, oh));
 +}
 +
-+/* Input, core and the settings both paths share; the input starts later */
-+static void t20_isp_hw_start(struct t20_isp *isp)
++/*
++ * VIC: parallel RAW10 in. Started last, just before the sensor is set up:
++ * frames of another mode (a sensor still sending its default one) make it
++ * report errors, and it stays out of step with the sensor, the picture
++ * shifted sideways and wrapped, until it is reset.
++ */
++static void t20_isp_vic_start(struct t20_isp *isp)
 +{
-+	u32 w = isp->width, h = isp->height, cfg = VIC_DB_RAW10;
++	u32 cfg = VIC_DB_RAW10;
 +	unsigned int flags = isp->ep.bus.parallel.flags;
-+	int i;
 +
-+	/* VIC: parallel RAW10 in */
 +	if (flags & V4L2_MBUS_VSYNC_ACTIVE_LOW)
 +		cfg |= VIC_DB_VSYNC_LOW;
 +	if (flags & V4L2_MBUS_HSYNC_ACTIVE_LOW)
 +		cfg |= VIC_DB_HSYNC_LOW;
 +	writel(VIC_INTF_DVP, isp->vic + VIC_INTF_TYPE);
 +	writel(cfg, isp->vic + VIC_DB_CFG);
-+	writel(w << 16 | h, isp->vic + VIC_RESOLUTION);
++	writel(isp->width << 16 | isp->height, isp->vic + VIC_RESOLUTION);
 +	writel(0, isp->vic + VIC_GLOBAL_CFG);
 +	writel(VIC_CONTROL_REG_ENABLE, isp->vic + VIC_CONTROL);
 +	writel(VIC_CONTROL_START, isp->vic + VIC_CONTROL);
++}
++
++/* The core and the settings both paths share; the input starts later */
++static void t20_isp_hw_start(struct t20_isp *isp)
++{
++	u32 w = isp->width, h = isp->height;
++	int i;
 +
 +	/* Core: geometry, pipeline */
 +	isp_write(isp, ISP_CONFIG_BUFFER_MODE, ISP_CONFIG_IN_VBLANK);
@@ -833,12 +845,12 @@ index 000000000..076de7775
 +		  ISP_CSC_HDOWN | ISP_CSC_VDOWN);
 +	t20_isp_load_scaler_filters(isp);
 +
-+	/* Interrupts: each path turns its line on */
++	/* Interrupts: the VIC's errors; each path turns its line on */
 +	isp_write(isp, ISP_IRQ_CLEAR, 0);
 +	isp_write(isp, ISP_IRQ_CLEAR, 0xffff);
 +	writel(GENMASK(22, 0), isp->irqc + IRQC_CLEAR);
-+	writel(GENMASK(22, 0), isp->irqc + IRQC_MASK);
-+	writel(0, isp->irqc + IRQC_ENABLE);
++	writel(GENMASK(22, 0) & ~IRQC_VIC_ERRORS, isp->irqc + IRQC_MASK);
++	writel(IRQC_VIC_ERRORS, isp->irqc + IRQC_ENABLE);
 +}
 +
 +static void t20_isp_hw_stop(struct t20_isp *isp)
@@ -933,6 +945,14 @@ index 000000000..076de7775
 +	if (!pending)
 +		return IRQ_NONE;
 +	writel(pending, isp->irqc + IRQC_CLEAR);
++
++	/* The VIC lost step with the sensor: it starts again at the next frame */
++	if (pending & IRQC_VIC_ERRORS) {
++		writel(readl(isp->vic + VIC_CONTROL) | VIC_CONTROL_RESET,
++		       isp->vic + VIC_CONTROL);
++		dev_warn_ratelimited(isp->dev, "input error %#lx, input reset\n",
++				     pending & IRQC_VIC_ERRORS);
++	}
 +
 +	status = isp_read(isp, ISP_IRQ_STATUS);
 +	isp_write(isp, ISP_IRQ_CLEAR, 0);
@@ -1095,6 +1115,7 @@ index 000000000..076de7775
 +
 +	if (!isp->streaming) {
 +		isp_write(isp, ISP_INPUT_MODE, ISP_INPUT_SAFE_START);
++		t20_isp_vic_start(isp);
 +		ret = v4l2_subdev_enable_streams(isp->sensor, isp->sensor_pad, BIT_ULL(0));
 +		if (ret) {
 +			t20_isp_path_stop(path);

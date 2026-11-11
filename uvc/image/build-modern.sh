@@ -44,6 +44,9 @@ zig cc -target mipsel-linux-musleabihf -mcpu=mips32r2 -Os -static -s \
     -o $OUT/payload/usr/bin/v4l2jpeg capture/v4l2jpeg.c
 zig cc -target mipsel-linux-musleabihf -mcpu=mips32r2 -Os -static -s \
     -o $OUT/payload/usr/bin/v4l2h264 capture/v4l2h264.c
+# ISP registers and controls from the shell (docs/t20-isp-hardware.md)
+zig cc -target mipsel-linux-musleabihf -mcpu=mips32r2 -Os -static -s \
+    -o $OUT/payload/usr/bin/isptool capture/isptool.c
 zig cc -target mipsel-linux-musleabihf -mcpu=mips32r2 -Os -static -s \
     -o $OUT/payload/usr/bin/audiorec capture/audiorec.c
 cp third_party/models/yolo-fastest-1.1.param third_party/models/yolo-fastest-1.1.bin \
