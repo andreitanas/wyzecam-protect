@@ -32,8 +32,10 @@ a UniFi OS console. `docs/kernel-modern.md` has the full state. Known gaps:
 
 ## Build
 
-Needs zig (0.17), python3, squashfs-tools, and for the kernel a Linux x86_64
-host or Docker (`docs/kernel-modern.md`, Building).
+Needs zig, the cross compiler for everything on the camera but the kernel
+(built and tested with 0.17.0; nothing pins the version), cmake and ninja
+for ncnn, python3, squashfs-tools, and for the kernel a Linux x86_64 host or
+Docker (`docs/kernel-modern.md`, Building).
 
 ```sh
 cd uvc
