@@ -4,12 +4,12 @@
 #   build/image-modern/root.sqfs for the root partition (mtd2): read-only
 #                                squashfs, mounted as / by the kernel
 #   build/image-modern/demo.bin  both, for the SD card and the setup button
-# The root filesystem is image/build.sh's (OpenMiko's base, slimmed, our
-# overlay) without the 3.10 kernel modules, plus our kernel's modules and
-# uvcd with its model under /rom/uvc, where uvcd-run looks for it. No
-# initramfs: nothing in RAM but /tmp and the writable layer over /etc
-# (S00rootfs). Settings stay on the config partition (mtd3, JFFS2), as
-# today.
+# The root filesystem is OpenMiko's base slimmed (image/build-rootfs.py:
+# busybox, wpa_supplicant and their libraries), our overlay (image/rootfs,
+# dropbear), our kernel's modules and uvcd with its model under /rom/uvc,
+# where uvcd-run looks for it. No initramfs: nothing in RAM but /tmp and
+# the writable layer over /etc (S00rootfs). Settings are on the config
+# partition (mtd3, JFFS2).
 # Install with image/flash-modern.sh over ssh, or with demo.bin.
 set -e
 cd "$(dirname "$0")/.."
@@ -52,8 +52,8 @@ zig cc -target mipsel-linux-musleabihf -mcpu=mips32r2 -Os -static -s \
 cp third_party/models/yolo-fastest-1.1.param third_party/models/yolo-fastest-1.1.bin \
     $OUT/payload/rom/uvc/models/
 
-python3 image/build-rootfs.py build/image/openmiko-rootfs.tar.xz $OUT/overlay $OUT/rootfs.tar \
-    $KOUT/modules $OUT/payload
+python3 image/build-rootfs.py build/image/openmiko-rootfs.tar.xz $OUT/rootfs.tar \
+    $OUT/overlay $KOUT/modules $OUT/payload
 # Owned by root (the tar's owners), xz like the kernel's squashfs support
 rm -f $OUT/root.sqfs
 sqfstar -quiet -comp xz -b 131072 -no-xattrs -force-uid 0 -force-gid 0 \

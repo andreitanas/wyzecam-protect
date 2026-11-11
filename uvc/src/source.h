@@ -53,7 +53,7 @@ struct source {
 
 // A source fed by a v4l2loopback device or a looped file, on its own thread.
 int source_start(struct source *s, const char *path, int fps);
-// A source fed by the caller through source_push (the libimp capture).
+// A source fed by the caller through source_push (the camera pipeline).
 void source_init(struct source *s, const char *name);
 // Hand an access unit to all subscribers; the caller keeps its reference.
 void source_push(struct source *s, struct frame *f);

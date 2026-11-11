@@ -1,27 +1,19 @@
 #!/usr/bin/env python3
-"""Build the camera's root filesystem tarball from OpenMiko's.
+"""Build the camera's root filesystem tar from OpenMiko's.
 
-OpenMiko's kernel unpacks rootfs.tar.xz from the root flash partition into a
-zram disk on every boot, so everything in it costs RAM. This keeps busybox,
-wpa_supplicant, the camera and WiFi drivers and the shared libraries those
-programs link, adds ours from the overlay (init scripts from image/rootfs/,
-our dropbear) and drops the rest (ffmpeg, RTSP, micropython, lighttpd,
-bash, OpenMiko's 2015 dropbear, ...). uvcd is not in here: it lives next to
-the tarball in flash.
+Keeps busybox, wpa_supplicant and the shared libraries they link from the
+base, drops the rest (the 3.10 kernel's modules, the vendor ISP's sensor
+files, ffmpeg, RTSP, micropython, lighttpd, bash, OpenMiko's 2015 dropbear,
+...) and adds the overlays: init scripts from image/rootfs/, our dropbear,
+our kernel's modules, uvcd and its model.
 
 The tarball is filtered member by member, never unpacked, so file modes,
-owners and names survive the host filesystem.
-
-    build-rootfs.py BASE.tar.xz OVERLAY_DIR OUT.tar.xz
-    build-rootfs.py BASE.tar.xz OVERLAY_DIR OUT.tar OVERLAY_DIR...
-
-With more overlays (our kernel's root filesystem, image/build-modern.sh)
-the base image's 3.10 kernel modules all go, the extra overlays (our
-modules, uvcd) are added like the first, and OUT is a plain tar for
+owners and names survive the host filesystem. OUT is a plain tar for
 sqfstar.
+
+    build-rootfs.py BASE.tar.xz OUT.tar OVERLAY_DIR...
 """
 import io
-import lzma
 import os
 import posixpath
 import struct
@@ -33,20 +25,12 @@ KEEP_PROGRAMS = {
     'bin/busybox',
     'usr/sbin/wpa_supplicant',
 }
-# Kernel modules kept (camera, WiFi; audio for the microphone later).
-KEEP_MODULES = {
-    'lib/modules/3.10.14/kernel/drivers/media/platform/tx-isp/tx-isp.ko',
-    'lib/modules/3.10.14/kernel/drivers/media/platform/sensors/sensor_info/sinfo.ko',
-    'lib/modules/3.10.14/kernel/drivers/media/platform/sensors/jxf22/sensor_jxf22.ko',
-    'lib/modules/3.10.14/kernel/drivers/net/wireless/rtl818x/rtl8189FS/8189fs.ko',
-    'driver/sensor_jxf23.ko',
-    'driver/audio.ko',
-}
 # Whole trees that go.
 DROP_TREES = (
     'app', 'var/www', 'var/spool', 'usr/libexec', 'usr/share/alsa', 'usr/share/ffmpeg',
     'usr/share/fonts', 'usr/share/pixmaps', 'usr/share/applications', 'usr/lib/micropython',
     'usr/lib/lighttpd', 'usr/lib/mjpg-streamer', 'usr/lib/tmpfiles.d', 'etc/ssl', 'etc/lighttpd', 'etc/logrotate.d', 'etc/init.d',
+    'lib/modules', 'driver', 'etc/sensor',
 )
 DROP_FILES = {
     'etc/openmiko.conf', 'etc/videocapture_settings.json',
@@ -96,7 +80,7 @@ def needed(data):
     return [data[strtab + v:data.index(b'\0', strtab + v)].decode() for v in entries]
 
 
-def main(base, overlay, out, *extra):
+def main(base, out, *overlays):
     src = tarfile.open(base)
     members, data = {}, {}
     for m in src.getmembers():
@@ -120,16 +104,7 @@ def main(base, overlay, out, *extra):
     def dropped(n):
         if n in DROP_FILES or any(n == t or n.startswith(t + '/') for t in DROP_TREES):
             return True
-        # Our kernel: nothing of the 3.10 kernel's modules, not even their
-        # indexes (the init scripts tell the kernels apart by uname -r, but
-        # an empty lib/modules/3.10.14 misleads anything that looks)
-        if extra and any(n == t or n.startswith(t + '/') for t in ('lib/modules/3.10.14', 'driver')):
-            return True
         m = members[n]
-        if m.isreg() and n.endswith('.ko'):
-            return bool(extra) or n not in KEEP_MODULES
-        if m.isreg() and n.startswith('driver/'):
-            return bool(extra) or n not in KEEP_MODULES
         if m.isreg() and posixpath.dirname(n) in BIN_DIRS:
             return n not in KEEP_PROGRAMS
         return False
@@ -161,7 +136,7 @@ def main(base, overlay, out, *extra):
 
     # Ours replace theirs.
     ours = {}
-    for top in (overlay,) + extra:
+    for top in overlays:
         for root, dirs, files in os.walk(top):
             # Empty directories too: mount points on a read-only root
             for f in files + [d for d in dirs if os.path.islink(os.path.join(root, d)) or
@@ -212,20 +187,10 @@ def main(base, overlay, out, *extra):
                 dst.addfile(t, fp)
     raw = buf.getvalue()
     total = sum(members[n].size for n in keep if n in members and members[n].isreg())
-    if extra:
-        with open(out, 'wb') as fp:
-            fp.write(raw)
-        print(f'{out}: {len(keep)} entries, {total / 1048576:.1f} MiB of base files, '
-              f'tar {len(raw) / 1048576:.1f} MiB')
-        return
-    # CRC32 and a small dictionary: decompressed by busybox in the kernel's
-    # initramfs with little RAM.
-    xz = lzma.compress(raw, format=lzma.FORMAT_XZ, check=lzma.CHECK_CRC32,
-                       filters=[{'id': lzma.FILTER_LZMA2, 'preset': 9, 'dict_size': 4 << 20}])
     with open(out, 'wb') as fp:
-        fp.write(xz)
-    print(f'{out}: {len(keep)} entries, {total / 1048576:.1f} MiB of files, '
-          f'tar {len(raw) / 1048576:.1f} MiB, xz {len(xz) / 1048576:.1f} MiB')
+        fp.write(raw)
+    print(f'{out}: {len(keep)} entries, {total / 1048576:.1f} MiB of base files, '
+          f'tar {len(raw) / 1048576:.1f} MiB')
 
 
 if __name__ == '__main__':

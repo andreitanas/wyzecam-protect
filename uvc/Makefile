@@ -6,7 +6,6 @@
 
 MBEDTLS := third_party/mbedtls
 CJSON := third_party/cjson
-INGENIC := third_party/ingenic
 NCNN := third_party/ncnn
 STB := third_party/stb
 VOAAC := third_party/vo-aacenc
@@ -76,13 +75,9 @@ build/host/%.o: %.c
 	@mkdir -p $(dir $@)
 	$(HOST_CC) $(if $(filter src/% test/%,$<),$(CFLAGS_COMMON),$(DEP_CFLAGS)) -c $< -o $@
 
-# libimp (Ingenic's camera SDK, prebuilt for uClibc) only in camera builds.
-IMP_CFLAGS := -DUVC_IMP -I$(INGENIC)/src/include/imp -I$(INGENIC)/src/include
-
 build/camera/%.o: %.c
 	@mkdir -p $(dir $@)
-	$(CAMERA_CC) $(if $(filter src/%,$<),$(CFLAGS_COMMON),$(DEP_CFLAGS)) \
-		$(if $(filter src/capture.c src/imp_compat.c,$<),$(IMP_CFLAGS)) -c $< -o $@
+	$(CAMERA_CC) $(if $(filter src/%,$<),$(CFLAGS_COMMON),$(DEP_CFLAGS)) -c $< -o $@
 
 OBJ_NAMES := $(patsubst %.cpp,%.o,$(patsubst %.c,%.o,$(SRC) $(DEP_SRC)))
 HOST_OBJ := $(addprefix build/host/,$(OBJ_NAMES))
@@ -99,12 +94,7 @@ build/uvcd: $(HOST_OBJ) $(NCNN_HOST)
 
 camera: build/uvcd-mipsel
 
-# libimp with its mmap/ftruncate calls pointed at our 32-bit-offset shims.
-build/camera/libimp.a: $(INGENIC)/lib/libimp.a tools/imp-rename.py
-	@mkdir -p $(dir $@)
-	python3 tools/imp-rename.py $< $@
-
-build/uvcd-mipsel: $(CAMERA_OBJ) $(NCNN_CAMERA) build/camera/libimp.a
+build/uvcd-mipsel: $(CAMERA_OBJ) $(NCNN_CAMERA)
 	$(CAMERA_CXX) -static -s -Wl,--gc-sections -o $@ $^ -lpthread -lm
 	@ls -l $@
 

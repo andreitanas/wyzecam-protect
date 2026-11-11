@@ -1,22 +1,17 @@
 #!/bin/sh
 # Settings live in the config flash partition (/config); uvcd and its model
-# in the read-only root partition (/rom). The SD card is optional: files
+# in the read-only root filesystem (/rom/uvc). The SD card is optional: files
 # under /sdcard/config/ are imported into /config/ when they differ, and
 # /config/overlay/ is copied over the root filesystem (wifi, hostname,
 # passwd, ssh keys).
 case "$1" in
 start)
-	mkdir -p /config /rom /sdcard
 	mount -t jffs2 /dev/mtdblock3 /config || logger -s -t config "cannot mount /config"
-	# On our kernel /rom is part of the squashfs root
-	awk '$2 == "/" && $3 == "squashfs" { f = 1 } END { exit !f }' /proc/mounts ||
-		mount -t jffs2 -o ro /dev/mtdblock2 /rom || logger -s -t config "cannot mount /rom"
 
-	# Our kernel polls for the card (no card-detect line): wait for it, 10 s
+	# The kernel polls for the card (no card-detect line): wait for it, 10 s
 	# at most. The rollback after a flash (S15rollback) needs it.
 	i=0
-	while [ ! -b /dev/mmcblk0 ] && [ $i -lt 10 ] &&
-		awk '$2 == "/" && $3 == "squashfs" { f = 1 } END { exit !f }' /proc/mounts; do
+	while [ ! -b /dev/mmcblk0 ] && [ $i -lt 10 ]; do
 		sleep 1
 		i=$((i + 1))
 	done

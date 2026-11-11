@@ -1,43 +1,21 @@
 #!/bin/sh
-# Image sensor and ISP drivers. uvcd, started by init (inittab) once boot is
+# Camera and audio drivers. uvcd, started by init (inittab) once boot is
 # done, drives the camera, including the IR cut filter and LEDs.
-MOD=/lib/modules/3.10.14/kernel/drivers/media/platform
-SENSOR_ARGS="data_interface=2 pwdn_gpio=-1 reset_gpio=18 sensor_gpio_func=0"
-gpio_out() {
-	[ -d /sys/class/gpio/gpio$1 ] || echo $1 > /sys/class/gpio/export
-	echo out > /sys/class/gpio/gpio$1/direction
-	echo $2 > /sys/class/gpio/gpio$1/value
-}
 case "$1" in
 start)
-	if [ "$(uname -r)" != 3.10.14 ]; then
-		# Our kernel: the ISP (t20-isp: /dev/video0 main stream,
-		# /dev/video1 second stream), sensor (jxf2x) and the VPU's JPEG
-		# and H.264 encoders (t20-vpu) drivers. uvcd uses them through
-		# src/capture_v4l2.c; v4l2grab, v4l2jpeg and v4l2h264 test them.
-		modprobe t20-isp && modprobe jxf2x ||
-			logger -s -t camera "camera drivers not loaded"
-		modprobe t20-vpu || logger -s -t camera "VPU encoders not loaded"
-		# The microphone: AIC, internal codec, their card; /dev/dsp
-		modprobe snd-soc-jz4740-i2s &&
-			modprobe snd-soc-t20-codec && modprobe snd-soc-simple-card &&
-			modprobe snd-pcm-oss ||
-			logger -s -t camera "audio drivers not loaded"
-		sensor=$(dmesg | grep -m1 -oE 'jxf2x [^:]*: jxf2[0-9]' | grep -oE 'jxf2[0-9]$')
-		logger -s -t camera "image sensor ${sensor:-not found}"
-		exit 0
-	fi
-	# USB power (some board revisions need it)
-	gpio_out 47 1
-	insmod $MOD/sensors/sensor_info/sinfo.ko
-	echo 1 > /proc/jz/sinfo/info
-	sensor=$(grep -m1 -oE 'jxf[0-9]*$' /proc/jz/sinfo/info)
-	logger -s -t camera "image sensor $sensor"
-	insmod $MOD/tx-isp/tx-isp.ko isp_clk=100000000
-	if [ "$sensor" = "jxf23" ]; then
-		insmod /driver/sensor_jxf23.ko $SENSOR_ARGS
-	else
-		insmod $MOD/sensors/jxf22/sensor_jxf22.ko $SENSOR_ARGS
-	fi
+	# The ISP (t20-isp: /dev/video0 main stream, /dev/video1 second
+	# stream), the sensor (jxf2x) and the VPU's JPEG and H.264 encoders
+	# (t20-vpu). uvcd uses them through src/capture_v4l2.c; v4l2grab,
+	# v4l2jpeg and v4l2h264 test them.
+	modprobe t20-isp && modprobe jxf2x ||
+		logger -s -t camera "camera drivers not loaded"
+	modprobe t20-vpu || logger -s -t camera "VPU encoders not loaded"
+	# The microphone: AIC, internal codec, their card; /dev/dsp
+	modprobe snd-soc-jz4740-i2s &&
+		modprobe snd-soc-t20-codec && modprobe snd-soc-simple-card &&
+		modprobe snd-pcm-oss ||
+		logger -s -t camera "audio drivers not loaded"
+	sensor=$(dmesg | grep -m1 -oE 'jxf2x [^:]*: jxf2[0-9]' | grep -oE 'jxf2[0-9]$')
+	logger -s -t camera "image sensor ${sensor:-not found}"
 	;;
 esac

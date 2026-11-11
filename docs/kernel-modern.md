@@ -23,18 +23,25 @@ them to H.264 and JPEG, and uvcd streams them to Protect (2026-10-28). Read
 | Watchdog | mainline `jz4740_wdt` | runs: `/dev/watchdog`, an unfed watchdog resets the SoC |
 | I2C (sensor bus) | mainline `i2c-jz4780` | runs |
 | WiFi, RTL8189FS on MSC1 | jwrdegoede/rtl8189ES_linux (out of tree), cfg80211 module; SDIO transfers by DMA | runs: WPA, DHCP, SSH; with both streams going out, the kernel's share of the CPU went from 31% (PIO) to 11% (DMA) |
-| Squashfs root on mtdblock2 | `image/build-modern.sh`, `image/flash-modern.sh` | runs; installed over SSH from both kernels |
+| Squashfs root on mtdblock2 | `image/build-modern.sh`, `image/flash-modern.sh` | runs; installed over SSH |
 | Sensor JX-F22/JX-F23 | ours, `jxf2x` (patch 0011; register tables from Ingenic's GPL sensor drivers) | runs (JX-F22): 1080p, exposure, gain, mirror and flip controls |
 | ISP | ours, `t20-isp` (patch 0012), from [`t20-isp-hardware.md`](t20-isp-hardware.md) | runs: 1920x1080 NV12 at 24.6 fps in colour: black level, auto white balance, colour matrix, sRGB gamma, noise reduction, sharpening, brightness/contrast/saturation |
 | JPEG encoder (VPU) | ours, `t20-vpu` (patch 0013; the VPU sequence and Huffman table from Ingenic's GPL X1000/T31 drivers) | runs: 1080p NV12 to JPEG in 10.7 ms, from a file or an ISP frame as a dma-buf |
 | H.264 encoder (VPU) | ours, `t20-vpu` (patch 0013; register names from Ingenic's GPL Helix encoder, the T20's values in [`t20-isp-hardware.md`](t20-isp-hardware.md)) | runs: 1080p Main profile, CABAC, I and P frames, 16 ms a frame in the VPU, constant QP or bit rate; streams pass strict ffmpeg decoding |
 | Audio | mainline `jz4740-i2s` (T20 variant) and `dma-jz4780`, our `t20-codec` (patches 0014, 0015; sequences from Ingenic's GPL OSS driver) | runs: the microphone at 8-96 kHz through `/dev/dsp` (OSS emulation) or ALSA; `audiorec` records it; uvcd high-passes and amplifies it in software; the speaker is not driven yet |
-| uvcd | `src/capture_v4l2.c` on this kernel, the closed libimp on 3.10 (`capture.c` picks at start) | runs: both H.264 streams to Protect, snapshots, object detection, auto exposure, the exposure figure for day/night; `test/test_capture_v4l2.c` (on the camera, uvcd stopped) checks streams, snapshots, raw frames, flip and mirror restarts and start/stop cycles |
+| uvcd | `src/capture_v4l2.c` (the libimp backend for the 3.10 kernel went on 2026-11-10) | runs: both H.264 streams to Protect, snapshots, object detection, auto exposure, the exposure figure for day/night; `test/test_capture_v4l2.c` (on the camera, uvcd stopped) checks streams, snapshots, raw frames, flip and mirror restarts and start/stop cycles |
 
-So the new kernel is a bring-up kernel: shell on the serial console, flash, SD card,
-GPIOs and LEDs, WiFi and SSH, the watchdog, and raw camera frames that only
-`v4l2grab` reads. The image scripts keep OpenMiko's kernel
-as the default (`image/build.sh`, `image/flash.sh` are unchanged in behaviour).
+**Decision (2026-11-10): this kernel is the only one the repo builds for.**
+uvcd's libimp backend, the shims that linked Ingenic's closed library, the
+vendor-kernel image scripts (`image/build.sh`, `image/flash.sh`, the JFFS2
+root with OpenMiko's kernel) and the 3.10 branches of the init scripts are
+gone; uvcd is 523 KB smaller. Everything ran on this kernel for two weeks,
+and nothing tested the other path any more. The tag `vendor-kernel` is the
+last commit run on OpenMiko's kernel; a `demo.bin` built there (kept as
+`deploy/recovery-vendor-kernel-demo.bin`, ignored, and on the test camera's
+SD card) is still the proven recovery image, because installing this
+kernel's `demo.bin` with the setup button has not been tried yet.
+`flash-modern.sh` still works from a camera running the vendor-kernel image.
 
 ## Where this stopped
 
@@ -319,15 +326,14 @@ Proposal, implemented in the image scripts:
   copies back if anything does not match. It works from OpenMiko's kernel (root
   in RAM) and from ours (it then runs from busybox copied to `/tmp` and reboots
   through sysrq at once, since it rewrote the filesystem it runs from).
-- The init scripts work on both kernels: S00rootfs does nothing unless `/` is a
-  squashfs, S10config skips the `/rom` mount, S20wifi loads the WiFi driver with
-  `modprobe` (modules from our kernel's `modules.dep`), S50camera logs that there
-  are no camera drivers and returns.
+- The init scripts are for this kernel only since 2026-11-10 (they told the
+  two apart by `uname -r` before): S20wifi and S50camera load the drivers
+  with `modprobe`.
 
-With our kernel, `build-rootfs.py` drops all of `lib/modules/3.10.14` and
-`driver/`, and the init scripts tell the kernels apart by `uname -r`. Empty
-directories from the overlays are kept: `/config` and `/sdcard` are mount
-points on a read-only root.
+`build-rootfs.py` drops the base image's 3.10 modules, `driver/` and the
+vendor ISP's sensor files (`etc/sensor`). Empty directories from the
+overlays are kept: `/config` and `/sdcard` are mount points on a read-only
+root.
 
 ## Camera stack
 
@@ -338,13 +344,11 @@ same Apical family). No code is taken from open-tx-isp (GPLv3), OpenIMP (mostly
 unlicensed) or the unlicensed parts of Ingenic's SDK; they serve as
 documentation, and what is used from them is recorded as hardware facts in
 [`t20-isp-hardware.md`](t20-isp-hardware.md). Ingenic's GPL-2.0+ sources (the
-sensor drivers, the 3.10 kernel) can be used directly. On top, uvcd has a
-second capture backend, `src/capture_v4l2.c`, with the same interface
-(`capture.h`) over these V4L2 drivers; `capture.c` uses it when the drivers
-are there and libimp otherwise. A libimp of our own (the plan below) was not
-needed: uvcd's interface to the camera is six functions, libimp's is 44 with
-the vendor's structure layouts. The closed libimp, `tools/imp-rename.py` and
-the `mm32`/`ftrunc32` shims stay only for the 3.10 kernel.
+sensor drivers, the 3.10 kernel) can be used directly. On top, uvcd's
+capture backend is `src/capture_v4l2.c`, over these V4L2 drivers. A libimp
+of our own (the plan below) was not needed: uvcd's interface to the camera
+is six functions, libimp's is 44 with the vendor's structure layouts. The
+closed libimp and its shims went on 2026-11-10 with the 3.10 kernel's image.
 
 | Piece | Kernel | Userspace (our libimp) | Status |
 |---|---|---|---|
@@ -576,8 +580,8 @@ otherwise). Without the flag the buffer stays uncached and correct, as
 
 ### uvcd's libimp calls
 
-uvcd calls 44 libimp functions (all in `src/capture.c`; `IMP_Log_Get_Option` is
-uvcd's own, in `imp_compat.c`). The first plan was to implement them over the
+uvcd called 44 libimp functions on the vendor's kernel (in `src/capture.c`
+up to the tag `vendor-kernel`). The first plan was to implement them over the
 drivers as below; `src/capture_v4l2.c` does the same work directly instead
 (one thread per ISP output: ISP buffer as a dma-buf into its H.264 context,
 the encoded frame to the source; JPEG from the main output on demand; raw
@@ -696,9 +700,9 @@ erased. Keep only a demo.bin meant for recovery on the card.
 
 ## Hardware test plan
 
-**Before anything**: an SD card with a known-good `demo.bin` (today's,
-`image/build.sh`, OpenMiko's kernel) and the setup-button procedure tested on this
-camera. A serial console (UART on ttyS1, 115200 8N1) is strongly recommended:
+**Before anything**: an SD card with a known-good `demo.bin` (the
+vendor-kernel image, built at the tag `vendor-kernel`, OpenMiko's kernel) and
+the setup-button procedure tested on this camera. A serial console (UART on ttyS1, 115200 8N1) is strongly recommended:
 without it a kernel that does not reach WiFi is a black box. With it, a test
 kernel boots from RAM through U-Boot ([Bring-up on hardware](#bring-up-on-hardware)).
 
@@ -760,8 +764,9 @@ but see the JFFS2 risk below.
    channel. Then `test_audio` (uvcd's path: high-pass, gain, AAC) and
    `ffmpeg -i /tmp/audio.aac`: a quiet room near -46 dBFS, no DC. Finally
    listen in Protect: room sound audible, voices clear, not slowed.
-8. **Back to OpenMiko's kernel** once (`image/flash.sh` writes only the root
-   partition and leaves our kernel in place, so use demo.bin) to prove the way back.
+8. **Back to OpenMiko's kernel** once, with the vendor-kernel `demo.bin` and
+   the setup button, to prove the way back; and this kernel's `demo.bin` the
+   same way, which a new camera's install needs (`make-sdcard.sh`).
 
 **Risks on another camera** (the first one boots, so these are about board
 differences):

@@ -9,9 +9,8 @@
 
 // The camera pipeline: sensor and ISP, a full-resolution H.264 encoder
 // feeding hi, a low-resolution one feeding lo, an on-demand JPEG encoder,
-// and raw low-resolution frames for motion detection. Through Ingenic's
-// libimp (camera builds, 3.10 kernel) or our kernel's V4L2 drivers
-// (capture_v4l2.c); either has a single owner process.
+// and raw low-resolution frames for motion detection, through our kernel's
+// V4L2 drivers (capture_v4l2.c), which have a single owner process.
 int capture_start(const struct config *c, struct source *hi, struct source *lo);
 void capture_stop(void);
 
@@ -36,8 +35,8 @@ void capture_isp(const struct isp_params *p);
 void capture_night(int night);
 
 // The exposure the scene needs, as the vendor ISP's "exposure log2 id"
-// (log2(integration lines x gain) x 65536; daynight.h), or -1 if this
-// pipeline does not give it (libimp: daynight reads /proc/jz/isp instead).
+// (log2(integration lines x gain) x 65536; daynight.h), or -1 when the
+// pipeline is not running.
 int capture_exposure(void);
 
 #endif

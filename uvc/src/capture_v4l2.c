@@ -1,5 +1,5 @@
-// The camera pipeline on our kernel (docs/kernel-modern.md): the same
-// interface as capture.c's libimp one, over the V4L2 drivers. The ISP's two
+// The camera pipeline on our kernel (docs/kernel-modern.md), over its V4L2
+// drivers. The ISP's two
 // outputs (t20-isp-main at the sensor's size, t20-isp-sub scaled) go as
 // dma-bufs to one H.264 encoder context each (t20-h264), the main one also
 // to the JPEG encoder (t20-jpeg) on demand. Auto exposure runs here, on the

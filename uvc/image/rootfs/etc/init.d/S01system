@@ -4,8 +4,6 @@ case "$1" in
 start)
 	syslogd -s 100 -b 1
 	klogd
-	# OpenMiko's kernel only: ours has devtmpfs and no uevent helper
-	[ -e /proc/sys/kernel/hotplug ] && echo /sbin/mdev > /proc/sys/kernel/hotplug
 	mdev -s
 	ifconfig lo 127.0.0.1 up
 	# Yellow until uvcd is connected to Protect.

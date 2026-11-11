@@ -9,8 +9,7 @@ vehicle, animal), with no RTSP, ONVIF or bridge box.
   It runs the object detector (ncnn, Yolo-Fastest) on the camera.
 - **Linux 6.18** with our drivers for the T20: clocks, pins, the image
   sensor, the ISP, the H.264 and JPEG encoders and the microphone. uvcd
-  uses them through V4L2 and ALSA. (The binary still links Ingenic's closed
-  libimp, which it only uses on the old vendor kernel.)
+  uses them through V4L2 and ALSA: no vendor kernel and no closed library.
 - **The image** is a kernel and a read-only squashfs root (busybox, dropbear,
   wpa_supplicant, the modules, uvcd) in the camera's flash. Settings live in
   the config flash partition, so the SD card is optional.
@@ -27,8 +26,8 @@ a UniFi OS console. `docs/kernel-modern.md` has the full state. Known gaps:
   not been checked in a dark room yet.
 - The JX-F23 sensor (later Wyze Cam v2 units) has a driver table and has not
   been run.
-- Installing the new-kernel image with the setup button has not been tried;
-  see Install.
+- Installing with the setup button, the way onto a new camera, has not
+  been tried with this kernel; see Install.
 
 ## Build
 
@@ -54,28 +53,25 @@ image/build-modern.sh       # build/image-modern/{uImage,root.sqfs,demo.bin}
 
 ## Install
 
-The tested way onto the new kernel is over SSH from a camera that already
-runs this firmware, with either kernel. A new camera therefore takes two
-steps.
+- **New camera, by SD card. Not tried yet with this kernel:** it worked
+  with the vendor-kernel image, which used the same bootloader procedure
+  and file format.
+  1. Run `uvc/make-sdcard.sh /Volumes/CARD`. It builds the image and copies
+     `demo.bin` with your settings. The card has nothing per camera: each
+     camera names itself after its MAC (`wyze-2BE8`) and makes its own
+     certificate.
+  2. Hold the setup button while powering the camera on. The bootloader
+     flashes `demo.bin`.
+  3. Take `demo.bin` off the card once the camera is up.
+- **Camera already running this firmware, over SSH. Tested:**
+  `uvc/image/flash-modern.sh [camera-ip]` saves the running image to the SD
+  card, writes and verifies the kernel and root partitions, and reboots.
+  - The first boots are trials. Check the camera, then run `rollback keep`
+    on it within 10 minutes; otherwise it puts the saved image back.
+  - It also works from a camera running the vendor-kernel image.
 
-1. **New camera: the vendor-kernel image by SD card.**
-   1. Run `uvc/make-sdcard.sh /Volumes/CARD`. It builds `image/build.sh`'s
-      image (OpenMiko's 3.10 kernel) and copies it with your settings. The
-      card has nothing per camera: each camera names itself after its MAC
-      (`wyze-2BE8`) and makes its own certificate.
-   2. Hold the setup button while powering the camera on. The bootloader
-      flashes `demo.bin`.
-   3. Take `demo.bin` off the card once the camera is up and keep it: it is
-      the recovery image.
-2. **The new kernel over SSH:** `uvc/image/flash-modern.sh [camera-ip]`. It
-   saves the running image to the SD card, writes and verifies the kernel
-   and root partitions, and reboots.
-   - The first boots are trials. Check the camera, then run `rollback keep`
-     on it within 10 minutes; otherwise it puts the saved image back.
-   - The same command updates a camera that already runs the new kernel.
-
-**Recovery:** put the vendor-kernel `demo.bin` on the SD card, hold the setup
-button and power on.
+**Recovery:** a known-good `demo.bin` on the SD card, the setup button held
+at power-on. The proven one is the vendor-kernel image (below).
 
 **Adopting:** the camera answers Protect's discovery and shows up there as
 ready to adopt. Protect's discovery only reaches its own subnet; elsewhere
@@ -96,10 +92,10 @@ resets it to ready to adopt.
 
 ## The vendor kernel
 
-uvcd first ran on OpenMiko's 3.10 kernel through Ingenic's libimp, and
-`uvc/image/build.sh` and `flash.sh` still build and write that image. Nothing
-tests it any more. The tag `vendor-kernel` is the last commit that was run
-that way.
+uvcd first ran on OpenMiko's 3.10 kernel through Ingenic's closed libimp.
+That backend and its image scripts are gone from `main`; the tag
+`vendor-kernel` is the last commit with them, and builds that image with
+`uvc/image/build.sh`.
 
 ## Layout and documents
 

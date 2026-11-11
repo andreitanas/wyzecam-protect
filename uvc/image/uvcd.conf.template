@@ -25,8 +25,9 @@
 #FLIP_V=0
 #FLIP_H=0
 
-# Day/night switching points, in the ISP's exposure figure (larger is
-# darker; see /proc/jz/isp/isp_info). Protect's custom night mode moves both.
+# Day/night switching points, in uvcd's exposure figure (larger is darker:
+# log2 of exposure lines x gain, x 65536; "daynight" lines in the log show
+# it). Protect's custom night mode moves both.
 #NIGHT_EXPOSURE=1200000
 #DAY_EXPOSURE=800000
 

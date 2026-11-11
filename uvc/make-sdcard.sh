@@ -1,8 +1,9 @@
 #!/bin/sh
 # Prepare an SD card (FAT32, partition 1) that installs and configures one
 # camera:
-#   demo.bin            our image (image/build.sh); the Wyze bootloader
-#                       flashes it when the setup button is held at power-on
+#   demo.bin            our image, kernel and root filesystem
+#                       (image/build-modern.sh); the Wyze bootloader flashes
+#                       it when the setup button is held at power-on
 #   config/overlay/     wifi, passwd, ssh key (../deploy, made by
 #                       ../deploy.sh), copied over the root filesystem at boot
 #   config/uvc/         uvcd.conf
@@ -20,14 +21,14 @@ DEPLOY=../deploy
 
 [ -d "$CARD" ] || { echo "$CARD is not mounted"; exit 1; }
 [ -d "$DEPLOY/config/overlay" ] || { echo "no $DEPLOY/config/overlay; run ../deploy.sh utils and passwd"; exit 1; }
-image/build.sh
+image/build-modern.sh
 
 mkdir -p "$CARD/config/overlay" "$CARD/config/uvc"
 cp -R "$DEPLOY/config/overlay/." "$CARD/config/overlay/"
 # OpenMiko's settings file has no meaning for our image, and a hostname
 # would be the same on every camera.
 rm -f "$CARD/config/overlay/etc/openmiko.conf" "$CARD/config/overlay/etc/hostname"
-cp build/image/demo.bin "$CARD/demo.bin"
+cp build/image-modern/demo.bin "$CARD/demo.bin"
 
 if [ ! -f "$CARD/config/uvc/uvcd.conf" ]; then
     cp image/uvcd.conf.template "$CARD/config/uvc/uvcd.conf"

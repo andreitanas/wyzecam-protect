@@ -83,8 +83,8 @@ static void usage(void) {
 }
 
 // SIGTERM/SIGINT are blocked in every thread and taken here, so Protect
-// sees a proper disconnect and libimp is shut down cleanly for whoever owns
-// the camera next.
+// sees a proper disconnect and the camera is stopped cleanly for whoever
+// owns it next.
 static void *signal_main(void *arg) {
     sigset_t *set = arg;
     int sig;
